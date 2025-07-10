@@ -146,6 +146,30 @@ class DefaultExtension extends MProvider {
         return { list: list, hasNextPage: hasNextPage };
     }
 
+    _parseChaptersFromPage(doc) {
+        const chapters = [];
+
+        const chapterElements = doc.select("a[href*='devilnovels.com/'][href*='capitulo'], a[href*='devilnovels.com/'][href*='chapter']");
+
+        for (const el of chapterElements) {
+            const name = el.text.trim();
+            const url = el.getHref;
+            const dateUpload = String(Date.now());
+
+            if (name && url && name.length > 3) {
+                chapters.push({
+                    name,
+                    url,
+                    dateUpload,
+                    scanlator: null,
+                });
+            }
+        }
+
+        return chapters;
+    }
+
+
     getHeaders(url) {
         throw new Error("getHeaders not implemented");
     }
@@ -229,69 +253,35 @@ class DefaultExtension extends MProvider {
 
     async getDetail(url) {
         const client = new Client();
-        const res = await client.get(url, this.headers);
-        const doc = new Document(res.body);
+        let currentPage = 1;
+        const allChapters = [];
 
-        // Buscar imagen de la novela
-        const imageUrl = doc.selectFirst("meta[property='og:image']")?.attr("content") || "";
+        while (true) {
+            const pageUrl = currentPage === 1 ? url : `${url}/page/${currentPage}`;
+            const res = await client.get(pageUrl, this.headers);
+            const doc = new Document(res.body);
 
-        // Buscar descripción
-        const description = doc.selectFirst("meta[property='og:description']")?.attr("content") || "";
+            const chapters = this._parseChaptersFromPage(doc);
 
-        // Información básica
-        const author = "Desconocido";
-        const artist = "";
-        const status = 0; // En curso por defecto
-        const genre = [];
+            if (chapters.length === 0) break;
 
-        // Buscar capítulos
-        const chapters = [];
-
-        // Buscar por selectores específicos de Devil Novels
-        let chapterElements = doc.select("h3 > a[href*='devilnovels.com/']");
-
-        // Si no encontramos capítulos, buscar de forma más general
-        if (chapterElements.length === 0) {
-            chapterElements = doc.select("a[href*='devilnovels.com/'][href*='capitulo'], a[href*='devilnovels.com/'][href*='chapter']");
+            allChapters.push(...chapters);
+            currentPage++;
         }
 
-        // Si aún no encontramos capítulos, buscar todos los enlaces que parezcan capítulos
-        if (chapterElements.length === 0) {
-            chapterElements = doc.select("a[href*='devilnovels.com/']").filter(el => {
-                const text = el.text.trim().toLowerCase();
-                const href = el.getHref;
-                return (text.includes('capítulo') || text.includes('capitulo') || text.includes('chapter')) &&
-                    !href.includes('page/') && !href.includes('e-page');
-            });
-        }
-
-        for (const el of chapterElements) {
-            const chapterName = el.text.trim();
-            const chapterUrl = el.getHref;
-            const dateUpload = String(Date.now());
-
-            if (chapterName && chapterUrl && chapterName.length > 3) {
-                chapters.push({
-                    name: chapterName,
-                    url: chapterUrl,
-                    dateUpload: dateUpload,
-                    scanlator: null,
-                });
-            }
-        }
-
-        chapters.reverse();
+        allChapters.reverse(); // Orden correcto (del primero al último)
 
         return {
-            imageUrl,
-            description,
-            genre,
-            author,
-            artist,
-            status,
-            chapters,
+            imageUrl: "",         // No la necesitas
+            description: "",      // No la necesitas
+            genre: [],            // No lo usas
+            author: "",           // Por defecto
+            artist: "",           // Vacío
+            status: 0,            // En curso por defecto
+            chapters: allChapters // ✅ Lo importante
         };
     }
+
 
     async getHtmlContent(name, url) {
         const client = new Client();
