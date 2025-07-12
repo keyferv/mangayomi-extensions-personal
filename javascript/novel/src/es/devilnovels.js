@@ -156,7 +156,7 @@ class DefaultExtension extends MProvider {
 
         for (const el of chapterElements) {
             const name = el.text.trim();
-            const url = el.getAttribute("href"); // Usar getAttribute en lugar de getHref
+            const url = el.getHref; // CORRECCIÓN: usar getHref en lugar de getAttribute("href")
             const dateUpload = String(Date.now());
 
             console.log(`📖 Procesando: "${name}" - ${url}`);
