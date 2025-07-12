@@ -146,6 +146,27 @@ class DefaultExtension extends MProvider {
         return { list: list, hasNextPage: hasNextPage };
     }
 
+    _parseChaptersFromPage(doc) {
+        const chapters = [];
+        const chapterElements = doc.select("a[href*='devilnovels.com/'][href*='capitulo'], a[href*='devilnovels.com/'][href*='chapter']");
+
+        for (const el of chapterElements) {
+            const name = el.text.trim();
+            const url = el.getAttribute("href");
+            const dateUpload = String(Date.now());
+
+            if (name && url && name.length > 3) {
+                chapters.push({
+                    name,
+                    url,
+                    dateUpload,
+                    scanlator: null,
+                });
+            }
+        }
+
+        return chapters;
+    }
 
     getHeaders(url) {
         throw new Error("getHeaders not implemented");
@@ -252,7 +273,7 @@ class DefaultExtension extends MProvider {
                 }
             }
 
-            const chapters = parseChaptersFromPage(doc);
+            const chapters = this._parseChaptersFromPage(doc);
 
             if (chapters.length === 0) break;
 
@@ -271,7 +292,9 @@ class DefaultExtension extends MProvider {
             status: 0,
             chapters: allChapters
         };
+
     }
+
 
 
     async getHtmlContent(name, url) {
@@ -385,25 +408,4 @@ class DefaultExtension extends MProvider {
     }
 }
 
-// ⬇️ FUNCION FUERA de la clase
-function parseChaptersFromPage(doc) {
-    const chapters = [];
-    const chapterElements = doc.select("a[href*='devilnovels.com/'][href*='capitulo'], a[href*='devilnovels.com/'][href*='chapter']");
 
-    for (const el of chapterElements) {
-        const name = el.text.trim();
-        const url = el.getAttribute("href");
-        const dateUpload = String(Date.now());
-
-        if (name && url && name.length > 3) {
-            chapters.push({
-                name,
-                url,
-                dateUpload,
-                scanlator: null,
-            });
-        }
-    }
-
-    return chapters;
-}
