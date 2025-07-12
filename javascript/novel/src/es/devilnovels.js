@@ -148,14 +148,26 @@ class DefaultExtension extends MProvider {
 
     _parseChaptersFromPage(doc) {
         const chapters = [];
-        const chapterElements = doc.select("a[href*='devilnovels.com/'][href*='capitulo'], a[href*='devilnovels.com/'][href*='chapter']");
+
+        // NUEVO selector corregido basado en el HTML real que me mostraste
+        const chapterElements = doc.select("article.elementor-post h3.elementor-post__title a");
+
+        console.log(`🔍 Elementos encontrados: ${chapterElements.length}`);
 
         for (const el of chapterElements) {
             const name = el.text.trim();
-            const url = el.getAttribute("href");
+            const url = el.getAttribute("href"); // Usar getAttribute en lugar de getHref
             const dateUpload = String(Date.now());
 
-            if (name && url && name.length > 3) {
+            console.log(`📖 Procesando: "${name}" - ${url}`);
+
+            // Filtros mejorados
+            if (name && url && name.length > 3 &&
+                (name.toLowerCase().includes('capitulo') ||
+                    name.toLowerCase().includes('chapter') ||
+                    name.toLowerCase().includes('shadow slave')) &&
+                !name.toLowerCase().includes('ultimo')) {
+
                 chapters.push({
                     name,
                     url,
@@ -165,6 +177,7 @@ class DefaultExtension extends MProvider {
             }
         }
 
+        console.log(`✅ Capítulos válidos encontrados: ${chapters.length}`);
         return chapters;
     }
 
