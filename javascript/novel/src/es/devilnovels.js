@@ -273,7 +273,9 @@ class DefaultExtension extends MProvider {
                 }
             }
 
+            console.log("✅ usando this._parseChaptersFromPage");
             const chapters = this._parseChaptersFromPage(doc);
+
 
             if (chapters.length === 0) break;
 
