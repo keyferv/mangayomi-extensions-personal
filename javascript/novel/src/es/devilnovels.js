@@ -145,30 +145,6 @@ class DefaultExtension extends MProvider {
 
         return { list: list, hasNextPage: hasNextPage };
     }
-    _parseChaptersFromPage(doc) {
-        const chapters = [];
-
-        const chapterElements = doc.select("a[href*='devilnovels.com/'][href*='capitulo'], a[href*='devilnovels.com/'][href*='chapter']");
-
-        for (const el of chapterElements) {
-            const name = el.text.trim();
-            const url = el.getAttribute("href");
-            const dateUpload = String(Date.now());
-
-            if (name && url && name.length > 3) {
-                chapters.push({
-                    name,
-                    url,
-                    dateUpload,
-                    scanlator: null,
-                });
-            }
-        }
-
-        return chapters;
-    }
-
-
 
 
     getHeaders(url) {
@@ -266,7 +242,6 @@ class DefaultExtension extends MProvider {
             const res = await client.get(pageUrl, this.headers);
             const doc = new Document(res.body);
 
-            // Solo en la primera página extraemos el widgetId
             if (currentPage === 1) {
                 const match = res.body.match(/<div[^>]+class="[^"]*elementor-widget-posts[^"]*"[^>]+data-id="([a-z0-9]+)"/);
                 widgetId = match ? match[1] : null;
@@ -277,7 +252,7 @@ class DefaultExtension extends MProvider {
                 }
             }
 
-            const chapters = this._parseChaptersFromPage(doc);
+            const chapters = parseChaptersFromPage(doc);
 
             if (chapters.length === 0) break;
 
@@ -285,7 +260,7 @@ class DefaultExtension extends MProvider {
             currentPage++;
         }
 
-        allChapters.reverse(); // Orden correcto
+        allChapters.reverse();
 
         return {
             imageUrl: "",
@@ -297,7 +272,6 @@ class DefaultExtension extends MProvider {
             chapters: allChapters
         };
     }
-
 
 
     async getHtmlContent(name, url) {
@@ -409,4 +383,27 @@ class DefaultExtension extends MProvider {
     getSourcePreferences() {
         throw new Error("getSourcePreferences not implemented");
     }
+}
+
+// ⬇️ FUNCION FUERA de la clase
+function parseChaptersFromPage(doc) {
+    const chapters = [];
+    const chapterElements = doc.select("a[href*='devilnovels.com/'][href*='capitulo'], a[href*='devilnovels.com/'][href*='chapter']");
+
+    for (const el of chapterElements) {
+        const name = el.text.trim();
+        const url = el.getAttribute("href");
+        const dateUpload = String(Date.now());
+
+        if (name && url && name.length > 3) {
+            chapters.push({
+                name,
+                url,
+                dateUpload,
+                scanlator: null,
+            });
+        }
+    }
+
+    return chapters;
 }
