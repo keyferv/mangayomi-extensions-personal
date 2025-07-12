@@ -149,14 +149,19 @@ class DefaultExtension extends MProvider {
     _parseChaptersFromPage(doc) {
         const chapters = [];
 
-        const chapterElements = doc.select("a[href*='devilnovels.com/'][href*='capitulo'], a[href*='devilnovels.com/'][href*='chapter']");
+        // Detectar todos los títulos válidos dentro de h3 o h4 con clase `elementor-post__title`
+        const titleElements = doc.select("h3.elementor-post__title a, h4.elementor-post__title a");
 
-        for (const el of chapterElements) {
-            const name = el.text.trim();
-            const url = el.getHref;
+        const seen = new Set();
+
+        for (const el of titleElements) {
+            const name = el.text?.trim();
+            const url = el.getAttribute('href')?.trim();
             const dateUpload = String(Date.now());
 
-            if (name && url && name.length > 3) {
+            if (name && url && !seen.has(url)) {
+                seen.add(url);
+
                 chapters.push({
                     name,
                     url,
@@ -168,6 +173,7 @@ class DefaultExtension extends MProvider {
 
         return chapters;
     }
+
 
 
     getHeaders(url) {
@@ -255,11 +261,26 @@ class DefaultExtension extends MProvider {
         const client = new Client();
         let currentPage = 1;
         const allChapters = [];
+        let widgetId = null;
 
         while (true) {
-            const pageUrl = currentPage === 1 ? url : `${url}/page/${currentPage}`;
+            const pageUrl = currentPage === 1
+                ? url
+                : `${url}/?e-page=${widgetId}&page=${currentPage}`;
+
             const res = await client.get(pageUrl, this.headers);
             const doc = new Document(res.body);
+
+            // Solo en la primera página extraemos el widgetId
+            if (currentPage === 1) {
+                const match = res.body.match(/<div[^>]+class="[^"]*elementor-widget-posts[^"]*"[^>]+data-id="([a-z0-9]+)"/);
+                widgetId = match ? match[1] : null;
+
+                if (!widgetId) {
+                    console.warn("⚠️ No se encontró el widgetId para paginado híbrido. El paginado puede fallar.");
+                    break;
+                }
+            }
 
             const chapters = this._parseChaptersFromPage(doc);
 
@@ -269,18 +290,19 @@ class DefaultExtension extends MProvider {
             currentPage++;
         }
 
-        allChapters.reverse(); // Orden correcto (del primero al último)
+        allChapters.reverse(); // Orden correcto
 
         return {
-            imageUrl: "",         // No la necesitas
-            description: "",      // No la necesitas
-            genre: [],            // No lo usas
-            author: "",           // Por defecto
-            artist: "",           // Vacío
-            status: 0,            // En curso por defecto
-            chapters: allChapters // ✅ Lo importante
+            imageUrl: "",
+            description: "",
+            genre: [],
+            author: "",
+            artist: "",
+            status: 0,
+            chapters: allChapters
         };
     }
+
 
 
     async getHtmlContent(name, url) {
