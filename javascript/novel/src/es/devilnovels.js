@@ -147,39 +147,55 @@ class DefaultExtension extends MProvider {
     }
 
     _parseChaptersFromPage(doc) {
-        const chapters = [];
 
-        // NUEVO selector corregido basado en el HTML real que me mostraste
-        const chapterElements = doc.select("article.elementor-post h3.elementor-post__title a");
+        const allChapters = [];
 
-        console.log(`🔍 Elementos encontrados: ${chapterElements.length}`);
+        const containers = doc.select('.elementor-posts-container');
 
-        for (const el of chapterElements) {
-            const name = el.text.trim();
-            const url = el.getHref; // CORRECCIÓN: usar getHref en lugar de getAttribute("href")
-            const dateUpload = String(Date.now());
+        if (containers.length === 0) {
+            // Si no encuentra el contenedor específico, busca directamente los artículos
+            // por si el diseño ha cambiado o es otra sección.
+            // Esto es un fallback, pero tu script ya da una buena pista.
+            const articles = doc.select("article.elementor-post");
+            articles.forEach(article => {
+                const a = article.selectFirst("h3.elementor-post__title a, h4.elementor-post__title a");
+                if (a) {
+                    allChapters.push({
+                        name: a.text.trim(),
+                        url: a.getHref,
+                        dateUpload: String(Date.now()), // No hay fecha explícita, usa la actual
+                        scanlator: null
+                    });
+                }
+            });
+        } else {
+            // Recorre los contenedores si los encuentra
+            containers.forEach(container => {
+                const articles = container.select("article.elementor-post");
+                const chaptersInContainer = articles.map(article => {
+                    const a = article.selectFirst("h3.elementor-post__title a, h4.elementor-post__title a");
+                    if (!a) return null; // Si no hay enlace, no es un capítulo válido
 
-            console.log(`📖 Procesando: "${name}" - ${url}`);
+                    return {
+                        name: a.text.trim(),
+                        url: a.getHref,
+                        dateUpload: String(Date.now()),
+                        scanlator: null
+                    };
+                }).filter(Boolean); // Elimina los `null`
 
-            // Filtros mejorados
-            if (name && url && name.length > 3 &&
-                (name.toLowerCase().includes('capitulo') ||
-                    name.toLowerCase().includes('chapter') ||
-                    name.toLowerCase().includes('shadow slave')) &&
-                !name.toLowerCase().includes('ultimo')) {
-
-                chapters.push({
-                    name,
-                    url,
-                    dateUpload,
-                    scanlator: null,
-                });
-            }
+                //Esto evita que "Último Capítulo" o similares se cuelen.
+                if (chaptersInContainer.length > 1) {
+                    allChapters.push(...chaptersInContainer);
+                }
+            });
         }
 
-        console.log(`✅ Capítulos válidos encontrados: ${chapters.length}`);
-        return chapters;
+        console.log(`✅ Capítulos extraídos de la página (dentro de _parseChaptersFromPage): ${allChapters.length}`);
+        return allChapters;
     }
+
+
 
     getHeaders(url) {
         throw new Error("getHeaders not implemented");
@@ -264,53 +280,104 @@ class DefaultExtension extends MProvider {
 
     async getDetail(url) {
         const client = new Client();
-        let currentPage = 1;
+        const MAX_PAGES = 35; // Límite de páginas a buscar, como en tu script
+        const REPEAT_LIMIT = 5; // Límite de repeticiones para detener el bucle
         const allChapters = [];
-        let widgetId = null;
+        const seenUrls = new Set(); // Para evitar capítulos duplicados
+        let repeatCount = 0; // Contador de repeticiones
 
-        while (true) {
-            const pageUrl = currentPage === 1
-                ? url
-                : `${url}/?e-page=${widgetId}&page=${currentPage}`;
+        // Extraer widgetId del URL o buscarlo si es la primera página.
+        // Asumiendo que bc939d8 es el widgetId que se ha determinado que funciona
+        // para la paginación de capítulos en Devil Novels.
+        let widgetId = 'bc939d8'; // Hardcodeado según tu script
 
-            const res = await client.get(pageUrl, this.headers);
-            const doc = new Document(res.body);
+        console.log(`✨ Iniciando getDetail para URL: ${url}`);
 
-            if (currentPage === 1) {
-                const match = res.body.match(/<div[^>]+class="[^"]*elementor-widget-posts[^"]*"[^>]+data-id="([a-z0-9]+)"/);
-                widgetId = match ? match[1] : null;
+        // Primero, obtener la información de la novela desde la URL principal
+        const initialRes = await client.get(url, this.headers);
+        const initialDoc = new Document(initialRes.body);
 
-                if (!widgetId) {
-                    console.warn("⚠️ No se encontró el widgetId para paginado híbrido. El paginado puede fallar.");
+        const description = initialDoc.selectFirst("div.elementor-widget-theme-post-content.elementor-widget p")?.text.trim() ||
+            initialDoc.selectFirst("div.entry-content p")?.text.trim() || "";
+
+        const imageUrl = initialDoc.selectFirst("div.elementor-element-26a9788 img")?.getSrc ||
+            initialDoc.selectFirst("meta[property='og:image']")?.attr("content") ||
+            "https://keyferv.github.io/mangayomi-extensions-personal/javascript/icon/es.devilnovels.png";
+
+        const genreElements = initialDoc.select("span.cat-links a, .elementor-widget-post-info__terms a");
+        const genre = genreElements.map(el => el.text.trim()).filter(Boolean);
+
+        const authorElement = initialDoc.selectFirst("div.elementor-element-1c9f049 span.elementor-icon-list-text");
+        const author = authorElement ? authorElement.text.trim().replace('Autor:', '').trim() : "";
+
+        const statusElement = initialDoc.selectFirst("div.elementor-element-6175e3a span.elementor-icon-list-text");
+        const statusText = statusElement ? statusElement.text.trim() : "";
+        const status = this.toStatus(statusText);
+
+
+        // Iniciar la recopilación de capítulos
+        for (let page = 1; page <= MAX_PAGES; page++) {
+            const pageUrl = page === 1
+                ? url.replace(/\/$/, '') // Asegura que la URL base no termine en '/' duplicado
+                : `${url.replace(/\/$/, '')}/?e-page=${widgetId}&page=${page}`; // Usa el widgetId y el formato de tu script
+
+            console.log(`🌐 Solicitando página de capítulos ${page}: ${pageUrl}`);
+
+            try {
+                const res = await client.get(pageUrl, this.headers);
+                const doc = new Document(res.body);
+
+                // Aquí es donde _parseChaptersFromPage entra en juego
+                const chaptersOnPage = this._parseChaptersFromPage(doc);
+
+                if (chaptersOnPage.length === 0) {
+                    console.warn(`⚠️ Página ${page} vacía o no se encontraron capítulos válidos. Terminando...`);
                     break;
                 }
+
+                let addedToCurrentBatch = 0;
+                for (const ch of chaptersOnPage) {
+                    if (seenUrls.has(ch.url)) {
+                        repeatCount++;
+                        // console.log(`🔁 Capítulo repetido: ${ch.name} (${repeatCount}/${REPEAT_LIMIT})`);
+                        if (repeatCount >= REPEAT_LIMIT) {
+                            console.warn(`🛑 Demasiados capítulos repetidos. Terminando la paginación.`);
+                            break; // Rompe el bucle interno de capítulos
+                        }
+                    } else {
+                        repeatCount = 0; // Reinicia el contador si se encuentra un capítulo nuevo
+                        seenUrls.add(ch.url);
+                        allChapters.push(ch);
+                        addedToCurrentBatch++;
+                    }
+                }
+
+                if (repeatCount >= REPEAT_LIMIT || addedToCurrentBatch === 0) {
+                    // Si se alcanzaron los límites de repetición o no se añadió nada nuevo en esta página, termina el bucle principal.
+                    break;
+                }
+
+                // Pequeño retardo para evitar sobrecargar el servidor
+                await new Promise(resolve => setTimeout(resolve, 300));
+
+            } catch (error) {
+                console.error(`❌ Error al obtener capítulos de la página ${page}:`, error);
+                break; // Sale del bucle en caso de error
             }
-
-            console.log("✅ usando this._parseChaptersFromPage");
-            const chapters = this._parseChaptersFromPage(doc);
-
-
-            if (chapters.length === 0) break;
-
-            allChapters.push(...chapters);
-            currentPage++;
         }
 
-        allChapters.reverse();
-
-        return {
-            imageUrl: "",
-            description: "",
-            genre: [],
-            author: "",
-            artist: "",
-            status: 0,
-            chapters: allChapters
-        };
-
+        // Tu script externo no ordena los capítulos. Mangayomi espera capítulos ascendentes.
+        // Si los capítulos vienen en orden descendente (el más nuevo primero), los invertimos.
+        // Si tu _parseChaptersFromPage los recoge desordenados, la ordenación numérica es buena.
+        allChapters.sort((a, b) => {
+            // Intenta extraer el número del capítulo para una mejor ordenación
+            const numA = parseFloat(a.name.match(/(\d+(\.\d+)?)/)?.[1] || 0);
+            const numB = parseFloat(b.name.match(/(\d+(\.\d+)?)/)?.[1] || 0);
+            if (numA !== numB) return numA - numB;
+            // Si los números son iguales, ordena alfabéticamente (fallback)
+            return a.name.localeCompare(b.name);
+        });
     }
-
-
 
     async getHtmlContent(name, url) {
         const client = new Client();
