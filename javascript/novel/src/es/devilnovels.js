@@ -145,23 +145,17 @@ class DefaultExtension extends MProvider {
 
         return { list: list, hasNextPage: hasNextPage };
     }
-
     _parseChaptersFromPage(doc) {
         const chapters = [];
 
-        // Detectar todos los títulos válidos dentro de h3 o h4 con clase `elementor-post__title`
-        const titleElements = doc.select("h3.elementor-post__title a, h4.elementor-post__title a");
+        const chapterElements = doc.select("a[href*='devilnovels.com/'][href*='capitulo'], a[href*='devilnovels.com/'][href*='chapter']");
 
-        const seen = new Set();
-
-        for (const el of titleElements) {
-            const name = el.text?.trim();
-            const url = el.getAttribute('href')?.trim();
+        for (const el of chapterElements) {
+            const name = el.text.trim();
+            const url = el.getAttribute("href");
             const dateUpload = String(Date.now());
 
-            if (name && url && !seen.has(url)) {
-                seen.add(url);
-
+            if (name && url && name.length > 3) {
                 chapters.push({
                     name,
                     url,
@@ -173,6 +167,7 @@ class DefaultExtension extends MProvider {
 
         return chapters;
     }
+
 
 
 
