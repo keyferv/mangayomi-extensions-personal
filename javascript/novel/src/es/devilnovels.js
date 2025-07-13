@@ -479,6 +479,8 @@ class DefaultExtension extends MProvider {
     // ...existing code...
 
     // ...existing code...
+    // ...existing code...
+
     async getDetail(url) {
         const client = new Client();
         const MAX_PAGES = 35;
@@ -487,7 +489,7 @@ class DefaultExtension extends MProvider {
         const seenUrls = new Set();
         let repeatCount = 0;
 
-        const fallbackWidgetId = "bc939d8"; // ← WidgetId fijo usado primero
+        const fallbackWidgetId = "bc939d8";
         let widgetId = fallbackWidgetId;
 
         console.log(`✨ Iniciando getDetail para URL: ${url}`);
@@ -496,18 +498,61 @@ class DefaultExtension extends MProvider {
         const initialRes = await client.get(url, this.headers);
         const initialDoc = new Document(initialRes.body);
 
-        // Extraer detalles de novela si quieres (de momento los dejamos vacíos)
-        const genre = [];
-        const author = "";
-        const artist = "";
-        const status = 5;
-        const description = "";
-        const imageUrl = "";
+        // CORREGIDO: Extracción completa de metadatos de novela
+
+        // --- Extracción de imagen con múltiples selectores ---
+        let imageUrl = initialDoc.selectFirst("div.separator img")?.getSrc ||
+            initialDoc.selectFirst("p img.aligncenter")?.getSrc ||
+            initialDoc.selectFirst("div.elementor-widget-container img")?.getSrc ||
+            initialDoc.selectFirst("div.entry-content img")?.getSrc ||
+            initialDoc.selectFirst("div.post-content img")?.getSrc ||
+            initialDoc.selectFirst("article img")?.getSrc ||
+            initialDoc.selectFirst("meta[property='og:image']")?.attr("content") ||
+            this.source.iconUrl; // IMPORTANTE: siempre tener fallback
+
+        // --- Extracción mejorada de descripción ---
+        let description = initialDoc.selectFirst("div.entry-content p")?.text.trim() ||
+            initialDoc.selectFirst("div.elementor-widget-container p")?.text.trim() ||
+            initialDoc.selectFirst("div.post-content p")?.text.trim() ||
+            initialDoc.selectFirst("meta[property='og:description']")?.attr("content") ||
+            initialDoc.selectFirst("meta[name='description']")?.attr("content") ||
+            "Sin descripción disponible"; // IMPORTANTE: siempre tener fallback
+
+        // Limpiar la descripción de elementos no deseados
+        if (description && description !== "Sin descripción disponible") {
+            description = description
+                .replace(/El Jefe Final me propuso matrimonio\.?\s*/i, "")
+                .replace(/Este capítulo ha sido traducido por[\s\S]*$/i, "")
+                .replace(/Puedes leer más capítulos[\s\S]*$/i, "")
+                .replace(/No se permite la reproducción[\s\S]*$/i, "")
+                .trim() || "Sin descripción disponible";
+        }
+
+        // --- Extracción de géneros ---
+        const genre = initialDoc.select("span.post-categories a, a[rel='tag'], .genre-links a")
+            .map(e => e.text.trim())
+            .filter(g => g && g.length > 0) || ["Sin género"]; // IMPORTANTE: siempre array válido
+
+        // --- Extracción de autor ---
+        const author = initialDoc.selectFirst("span.author a")?.text.trim() ||
+            initialDoc.selectFirst("meta[name='author']")?.attr("content") ||
+            "Autor desconocido"; // IMPORTANTE: siempre tener valor
+
+        const artist = "Artista desconocido"; // IMPORTANTE: siempre tener valor
+
+        // --- Extracción de estado ---
+        let statusText = initialDoc.selectFirst("div.elementor-element:has(h2:contains(Estado)) + div p")?.text.trim() ||
+            initialDoc.selectFirst("p:contains(Estado)")?.text.trim() ||
+            initialDoc.selectFirst(".status")?.text.trim();
+
+        if (statusText && statusText.includes(":")) {
+            statusText = statusText.split(":")[1]?.trim();
+        }
+        const status = statusText ? this.toStatus(statusText) : 0; // IMPORTANTE: siempre número válido
 
         let validWidgetFound = false;
 
         for (let attempt = 0; attempt < 2 && !validWidgetFound; attempt++) {
-            // Si el intento anterior falló, recuperar dinámicamente el widgetId
             if (attempt === 1) {
                 const match = initialRes.body.match(/<div[^>]+class="[^"]*elementor-widget-posts[^"]*"[^>]+data-id="([a-z0-9]+)"/);
                 widgetId = match ? match[1] : null;
@@ -520,7 +565,6 @@ class DefaultExtension extends MProvider {
                 console.log(`🔁 Usando widgetId dinámico: ${widgetId}`);
             }
 
-            // Paginación
             for (let page = 1; page <= MAX_PAGES; page++) {
                 const pageUrl = page === 1
                     ? url.replace(/\/$/, '')
@@ -536,8 +580,7 @@ class DefaultExtension extends MProvider {
                     if (chaptersOnPage.length === 0) {
                         console.warn(`⚠️ Página ${page} vacía. Intento: ${attempt}`);
                         if (page === 1 && attempt === 0) {
-                            // ← Falló en el primer intento con widget fijo
-                            break; // salta al segundo intento
+                            break;
                         } else {
                             return {
                                 imageUrl,
@@ -586,6 +629,8 @@ class DefaultExtension extends MProvider {
         });
 
         console.log(`✅ Total capítulos: ${allChapters.length}`);
+        console.log(`🖼️ Imagen URL: ${imageUrl}`);
+        console.log(`📝 Descripción: ${description.substring(0, 100)}...`);
 
         return {
             imageUrl,
@@ -597,6 +642,7 @@ class DefaultExtension extends MProvider {
             chapters: allChapters
         };
     }
+
 
     async getHtmlContent(name, url) {
         const client = new Client();
