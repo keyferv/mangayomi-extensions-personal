@@ -319,15 +319,15 @@ class DefaultExtension extends MProvider {
         return this._parseLatestUpdatesList(doc);
     }
 
+    // ...existing code...
+
     async search(query, page, filters) {
         const url = `${this.source.baseUrl}/?s=${encodeURIComponent(query)}&paged=${page}`;
         const res = await new Client().get(url, this.headers);
         const doc = new Document(res.body);
 
-        // Usar el mismo parser que funciona en mangaListFromPage
         const list = [];
         const processedLinks = new Set();
-
         const entryElements = doc.select("article.post");
 
         for (const element of entryElements) {
@@ -340,16 +340,25 @@ class DefaultExtension extends MProvider {
             let imageUrl = "";
 
             if (isChapter) {
-                // ← CAPÍTULO, construir URL de novela
+                // ← CAPÍTULO, construir URL de novela CORREGIDA
                 novelName = categoryLinkElement.text.trim();
-                const slug = this.slugify(novelName);
-                novelLink = `${this.source.baseUrl}/${slug}/`;
 
-                // Obtener portada desde la página principal de la novela
-                // ↓ Alternativamente, solo usar ícono por defecto para evitar más llamadas
+                // CORREGIDO: No usar slugify, extraer directamente del href de la categoría
+                const categoryHref = categoryLinkElement.getHref;
+                // Ejemplo: "https://devilnovels.com/category/chaotic-sword-god/" 
+                // -> "https://devilnovels.com/chaotic-sword-god/"
+                if (categoryHref && categoryHref.includes('/category/')) {
+                    const categorySlug = categoryHref.split('/category/')[1].replace('/', '');
+                    novelLink = `${this.source.baseUrl}/${categorySlug}/`;
+                } else {
+                    // Fallback al método anterior si no funciona
+                    const slug = this.slugify(novelName);
+                    novelLink = `${this.source.baseUrl}/${slug}/`;
+                }
+
                 imageUrl = this.source.iconUrl;
             } else {
-                // ← ENTRADA DE NOVELA
+                // ← ENTRADA DE NOVELA DIRECTA (este era el problema - no se incluían)
                 const titleElement = element.selectFirst("h2.entry-title a");
                 const imgElement = element.selectFirst("img");
                 novelName = titleElement?.text.trim() || "";
@@ -357,8 +366,14 @@ class DefaultExtension extends MProvider {
                 imageUrl = imgElement?.getSrc || this.source.iconUrl;
             }
 
+            // CORREGIDO: Validación mejorada para incluir AMBOS tipos
             if (novelLink && novelName && !processedLinks.has(novelLink) &&
-                !novelName.toLowerCase().includes("capítulo") && !novelName.toLowerCase().includes("chapter")) {
+                !novelName.toLowerCase().includes("capítulo") &&
+                !novelName.toLowerCase().includes("chapter") &&
+                !novelLink.includes('/tag/') &&
+                !novelLink.includes('/author/') &&
+                !novelLink.includes('/page/')) {
+
                 list.push({ name: novelName, imageUrl, link: novelLink });
                 processedLinks.add(novelLink);
             }
@@ -370,6 +385,7 @@ class DefaultExtension extends MProvider {
         return { list, hasNextPage };
     }
 
+    // ...existing code...
     async getDetail(url) {
         const client = new Client();
         const MAX_PAGES = 35;
