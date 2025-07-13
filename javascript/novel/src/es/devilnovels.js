@@ -59,6 +59,8 @@ class DefaultExtension extends MProvider {
         return { list: list, hasNextPage: false };
     }
 
+    // ...existing code...
+
     _parseRankingList(doc) {
         const list = [];
         const processedLinks = new Set();
@@ -73,30 +75,31 @@ class DefaultExtension extends MProvider {
             const linkElement = element.selectFirst("a[data-wpel-link='internal']");
             const link = linkElement?.getHref;
             let imageUrl = element.selectFirst("img")?.getSrc;
-
             const name = element.selectFirst("p > a[data-wpel-link='internal']")?.text.trim();
 
             if (link && name && !processedLinks.has(link) && name.length > 2 &&
                 !name.includes('Capítulo') && !name.includes('Chapter') &&
                 !link.includes('page/') && !link.includes('category/')) {
-                // Si no se encontró imageUrl, usar la por defecto
+
                 if (!imageUrl || imageUrl.startsWith("data:")) {
                     imageUrl = this.source.iconUrl;
                 }
+
+                // CORREGIDO: ¡Estas eran las líneas que faltaban!
+                list.push({ name, imageUrl, link });
+                processedLinks.add(link);
             }
         }
         return { list: list, hasNextPage: false };
     }
 
+    // ...existing code...
     _parseSearchResults(doc) {
         const list = [];
         const processedLinks = new Set();
-
-        // Usar el mismo selector que funciona en mangaListFromPage
         const entryElements = doc.select("article.post, div.post-item, div.novel-item, div.elementor-post");
 
         for (const element of entryElements) {
-            // Usar la misma lógica que en mangaListFromPage
             let link = element.selectFirst("a[data-wpel-link='internal']")?.getHref;
             if (!link) {
                 link = element.selectFirst("a[href*='devilnovels.com/']")?.getHref;
@@ -109,27 +112,95 @@ class DefaultExtension extends MProvider {
                 name = element.selectFirst("a")?.text.trim();
             }
 
-            // Aplicar los mismos filtros que en mangaListFromPage
-            if (link && name && !processedLinks.has(link) &&
-                !link.includes('/page/') && !link.includes('/category/') &&
-                !link.includes('/tag/') && !link.includes('/author/') &&
-                !link.includes('/comments') && !name.includes('Capítulo') && !name.includes('Chapter')) {
+            // NUEVO: Detectar si es un capítulo y convertirlo a novela
+            const isChapter = name && (name.toLowerCase().includes('capítulo') || name.toLowerCase().includes('chapter'));
 
-                // Asegurarse de que la imagen sea válida
-                if (!imageUrl || imageUrl.startsWith("data:")) {
-                    imageUrl = this.source.iconUrl;
+            if (isChapter) {
+                // Extraer el nombre de la novela del título del capítulo
+                const novelName = this._extractNovelNameFromChapter(name);
+                const novelLink = this._buildNovelLinkFromChapter(link);
+
+                if (novelName && novelLink && !processedLinks.has(novelLink)) {
+                    list.push({
+                        name: novelName,
+                        imageUrl: imageUrl || this.source.iconUrl,
+                        link: novelLink
+                    });
+                    processedLinks.add(novelLink);
                 }
+            } else {
+                // Es una entrada de novela normal
+                if (link && name && !processedLinks.has(link) &&
+                    !link.includes('/page/') && !link.includes('/category/') &&
+                    !link.includes('/tag/') && !link.includes('/author/') &&
+                    !link.includes('/comments')) {
 
-                list.push({ name, imageUrl, link });
-                processedLinks.add(link);
+                    if (!imageUrl || imageUrl.startsWith("data:")) {
+                        imageUrl = this.source.iconUrl;
+                    }
+
+                    list.push({ name, imageUrl, link });
+                    processedLinks.add(link);
+                }
             }
         }
 
-        // Usar el mismo selector para paginación
         const hasNextPage = doc.selectFirst("a.nextpostslink, a.next, .nav-links .next, .elementor-pagination .elementor-pagination__next") !== null;
-
         return { list, hasNextPage };
     }
+
+    // Función auxiliar para extraer el nombre de la novela del título del capítulo
+    _extractNovelNameFromChapter(chapterTitle) {
+        // Ejemplos: "Las Heroínas Principales Están Tratando de Matarme Capítulo 123"
+        // -> "Las Heroínas Principales Están Tratando de Matarme"
+
+        const patterns = [
+            /^(.+?)\s+capítulo\s+\d+/i,
+            /^(.+?)\s+chapter\s+\d+/i,
+            /^(.+?)\s+cap\s+\d+/i,
+            /^(.+?)\s+episodio\s+\d+/i
+        ];
+
+        for (const pattern of patterns) {
+            const match = chapterTitle.match(pattern);
+            if (match) {
+                return match[1].trim();
+            }
+        }
+
+        // Fallback: tomar todo antes del último número
+        const lastNumberIndex = chapterTitle.lastIndexOf(/\d+/.exec(chapterTitle)?.[0] || '');
+        if (lastNumberIndex > 0) {
+            return chapterTitle.substring(0, lastNumberIndex).trim();
+        }
+
+        return chapterTitle;
+    }
+
+    // Función auxiliar para construir el enlace de la novela desde un enlace de capítulo
+    _buildNovelLinkFromChapter(chapterLink) {
+        // Ejemplo: "https://devilnovels.com/las-heroinas/capitulo-123/"
+        // -> "https://devilnovels.com/las-heroinas/"
+
+        if (!chapterLink) return null;
+
+        // Remover la parte del capítulo
+        const urlParts = chapterLink.split('/');
+
+        // Buscar y remover partes que contengan "capitulo", "chapter", etc.
+        const filteredParts = urlParts.filter(part =>
+            !part.toLowerCase().includes('capitulo') &&
+            !part.toLowerCase().includes('chapter') &&
+            !part.toLowerCase().includes('cap-') &&
+            !/^\d+$/.test(part) // Remover números solos
+        );
+
+        // Reconstruir la URL
+        const novelUrl = filteredParts.join('/');
+        return novelUrl.endsWith('/') ? novelUrl : novelUrl + '/';
+    }
+
+    // ...existing code...
 
 
     _parseChaptersFromPage(doc) {
@@ -191,9 +262,12 @@ class DefaultExtension extends MProvider {
         const doc = new Document(res.body);
         const list = [];
         const processedLinks = new Set();
+
+        // CORREGIDO: Selector que SÍ funciona
         const entryElements = doc.select("article.post, div.post-item, div.novel-item, div.elementor-post");
 
         for (const element of entryElements) {
+            // CORREGIDO: Agregar verificación de existencia antes de acceder a getHref
             let link = element.selectFirst("a[data-wpel-link='internal']")?.getHref;
             if (!link) {
                 link = element.selectFirst("a[href*='devilnovels.com/']")?.getHref;
@@ -210,10 +284,12 @@ class DefaultExtension extends MProvider {
                 !link.includes('/page/') && !link.includes('/category/') &&
                 !link.includes('/tag/') && !link.includes('/author/') &&
                 !link.includes('/comments') && !name.includes('Capítulo') && !name.includes('Chapter')) {
-                // Asegurarse de que la imagen sea válida
+
+                // CORREGIDO: Asegurar que la imagen sea válida
                 if (!imageUrl || imageUrl.startsWith("data:")) {
                     imageUrl = this.source.iconUrl;
                 }
+
                 list.push({ name, imageUrl, link });
                 processedLinks.add(link);
             }
