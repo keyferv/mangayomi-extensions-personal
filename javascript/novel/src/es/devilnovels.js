@@ -81,40 +81,53 @@ class DefaultExtension extends MProvider {
 
     _parseSearchResults(doc) {
         const list = [];
-        const processedLinks = new Set(); // Para evitar duplicados de novelas
+        const processedLinks = new Set();
 
-        // Cada resultado individual (capítulo o novela) está en un <article>
-        const entryElements = doc.select("article.post");
+        const articles = doc.select("article");
 
-        for (const element of entryElements) {
-            // Extraer el enlace de la categoría (que debería ser el enlace a la novela principal)
-            const categoryLinkElement = element.selectFirst("span.ast-taxonomy-container.cat-links a[data-wpel-link='internal']");
-            const novelLink = categoryLinkElement?.getHref;
-            const novelName = categoryLinkElement?.text.trim(); // Este es el nombre de la NOVELA PRINCIPAL
+        for (const article of articles) {
+            const titleElement = article.selectFirst("h2.entry-title a, h3.entry-title a, h4.entry-title a");
+            const name = titleElement?.text.trim();
+            const link = titleElement?.getHref;
 
-            // El problema es que en la búsqueda, Devil Novels no muestra la imagen de la novela,
-            // sino que la portada del capítulo es el mismo icono de Devil Novels o no hay.
-            // Por lo tanto, usaremos una imagen por defecto para las búsquedas.
-            const imageUrl = "https://keyferv.github.io/mangayomi-extensions-personal/javascript/icon/es.devilnovels.png"; // Imagen por defecto
+            let imageUrl = article.selectFirst("img")?.getSrc?.trim();
+            if (!imageUrl || imageUrl.includes("default") || imageUrl.endsWith(".svg")) {
+                imageUrl = "https://keyferv.github.io/mangayomi-extensions-personal/javascript/icon/es.devilnovels.png";
+            }
 
-            // Asegurarse de que tenemos un nombre de novela principal y un enlace válido,
-            // y que no lo hayamos añadido ya (para evitar duplicados si varios capítulos de la misma novela aparecen).
-            if (novelLink && novelName && !processedLinks.has(novelLink) &&
-                !novelName.includes('Capítulo') && !novelName.includes('Chapter')) { // Filtra si por alguna razón el nombre de la categoría es un capítulo
+            const hasImage = article.selectFirst(".ast-blog-featured-section img") !== null;
+            const hasDescription = article.selectFirst(".ast-excerpt-container") !== null;
 
-                list.push({ name: novelName, imageUrl: imageUrl, link: novelLink });
-                processedLinks.add(novelLink);
+            // CASO 1: Ficha completa de novela
+            const isNovel = hasImage && hasDescription && !name.toLowerCase().includes("capítulo");
+
+            if (name && link && isNovel && !processedLinks.has(link)) {
+                list.push({ name, imageUrl, link });
+                processedLinks.add(link);
+                continue;
+            }
+
+            // CASO 2: Capítulo suelto → reconstruimos el enlace a la novela
+            const categoryLink = article.selectFirst("span.cat-links a[data-wpel-link='internal']");
+            const categoryName = categoryLink?.text.trim();
+
+            if (categoryName && !processedLinks.has(categoryName)) {
+                const slug = categoryName.replace(/\s+/g, "-"); // Espacios por guiones
+                const novelUrl = `${this.source.baseUrl}/${slug}/`;
+
+                list.push({
+                    name: categoryName,
+                    imageUrl,
+                    link: novelUrl,
+                });
+                processedLinks.add(categoryName);
             }
         }
 
-        // --- Paginación para la búsqueda ---
-        // Necesitamos encontrar los selectores para la paginación en los resultados de búsqueda.
-        // Basado en sitios de WordPress, estos son algunos selectores comunes:
-        const nextPageElement = doc.selectFirst("a.nextpostslink, .nav-links .next, .page-numbers .next");
-        const hasNextPage = nextPageElement !== null;
-
-        return { list: list, hasNextPage: hasNextPage };
+        const hasNextPage = doc.selectFirst("a.nextpostslink, .nav-links .next, .page-numbers .next") !== null;
+        return { list, hasNextPage };
     }
+
 
     _parseChaptersFromPage(doc) {
         const allChapters = [];
