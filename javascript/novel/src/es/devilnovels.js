@@ -47,16 +47,14 @@ class DefaultExtension extends MProvider {
             const name = linkElement?.text.trim();
 
             if (link && name && !processedLinks.has(link) && name.length > 2 &&
-                !name.includes('Capítulo') && !name.includes('Chapter') &&
-                !link.includes('page/') && !link.includes('category/')) {
+                !name.includes('Capítulo') && !name.includes('Chapter')) {
                 // Si no se encontró imageUrl, usar la por defecto
                 if (!imageUrl || imageUrl.startsWith("data:")) {
                     imageUrl = this.source.iconUrl;
                 }
-                list.push({ name, imageUrl, link }); // <-- ¡Esto faltaba!
-                processedLinks.add(link); // <-- ¡Esto faltaba!
+                list.push({ name, imageUrl, link });
+                processedLinks.add(link);
             }
-
         }
         return { list: list, hasNextPage: false };
     }
@@ -85,56 +83,50 @@ class DefaultExtension extends MProvider {
                 if (!imageUrl || imageUrl.startsWith("data:")) {
                     imageUrl = this.source.iconUrl;
                 }
-                list.push({ name, imageUrl, link }); // <--- ¡Añadir esta línea!
-                processedLinks.add(link); // <--- ¡Añadir esta línea!
             }
         }
         return { list: list, hasNextPage: false };
     }
 
-
     _parseSearchResults(doc) {
         const list = [];
         const processedLinks = new Set();
 
-        const entryElements = doc.select("article.post");
+        // Usar el mismo selector que funciona en mangaListFromPage
+        const entryElements = doc.select("article.post, div.post-item, div.novel-item, div.elementor-post");
 
         for (const element of entryElements) {
-            // 1. Detectar si es capítulo con categoría
-            const categoryLinkElement = element.selectFirst("span.cat-links a[data-wpel-link='internal']");
-            const isChapter = !!categoryLinkElement;
-
-            let novelName = "";
-            let novelLink = "";
-            let imageUrl = "";
-
-            if (isChapter) {
-                // ← CAPÍTULO, construir URL de novela
-                novelName = categoryLinkElement.text.trim();
-                const slug = this.slugify(novelName);
-                novelLink = `${this.source.baseUrl}/${slug}/`;
-
-                // Obtener portada desde la página principal de la novela
-                // ↓ Alternativamente, solo usar ícono por defecto para evitar más llamadas
-                imageUrl = this.source.iconUrl;
-            } else {
-                // ← ENTRADA DE NOVELA
-                const titleElement = element.selectFirst("h2.entry-title a");
-                const imgElement = element.selectFirst("img");
-                novelName = titleElement?.text.trim() || "";
-                novelLink = titleElement?.getHref;
-                imageUrl = imgElement?.getSrc || this.source.iconUrl;
+            // Usar la misma lógica que en mangaListFromPage
+            let link = element.selectFirst("a[data-wpel-link='internal']")?.getHref;
+            if (!link) {
+                link = element.selectFirst("a[href*='devilnovels.com/']")?.getHref;
             }
 
-            if (novelLink && novelName && !processedLinks.has(novelLink) &&
-                !novelName.toLowerCase().includes("capítulo") && !novelName.toLowerCase().includes("chapter")) {
-                list.push({ name: novelName, imageUrl, link: novelLink });
-                processedLinks.add(novelLink);
+            let imageUrl = element.selectFirst("img")?.getSrc;
+            let name = element.selectFirst("h2.entry-title a, h3.entry-title a, .novel-title a, .elementor-post__title a")?.text.trim();
+
+            if (!name) {
+                name = element.selectFirst("a")?.text.trim();
+            }
+
+            // Aplicar los mismos filtros que en mangaListFromPage
+            if (link && name && !processedLinks.has(link) &&
+                !link.includes('/page/') && !link.includes('/category/') &&
+                !link.includes('/tag/') && !link.includes('/author/') &&
+                !link.includes('/comments') && !name.includes('Capítulo') && !name.includes('Chapter')) {
+
+                // Asegurarse de que la imagen sea válida
+                if (!imageUrl || imageUrl.startsWith("data:")) {
+                    imageUrl = this.source.iconUrl;
+                }
+
+                list.push({ name, imageUrl, link });
+                processedLinks.add(link);
             }
         }
 
-        const nextPageElement = doc.selectFirst("a.nextpostslink, .nav-links .next, .page-numbers .next");
-        const hasNextPage = nextPageElement !== null;
+        // Usar el mismo selector para paginación
+        const hasNextPage = doc.selectFirst("a.nextpostslink, a.next, .nav-links .next, .elementor-pagination .elementor-pagination__next") !== null;
 
         return { list, hasNextPage };
     }
@@ -142,10 +134,10 @@ class DefaultExtension extends MProvider {
 
     _parseChaptersFromPage(doc) {
         const allChapters = [];
-        const containers = doc.select('.elementor-posts-container, div.entry-content'); // Añadimos div.entry-content
+        const containers = doc.select('.elementor-posts-container');
 
         if (containers.length === 0) {
-            const articles = doc.select("article.elementor-post, article.post"); // Añadimos article.post
+            const articles = doc.select("article.elementor-post");
             articles.forEach(article => {
                 const a = article.selectFirst("h3.elementor-post__title a, h4.elementor-post__title a");
                 if (a) {
@@ -159,7 +151,7 @@ class DefaultExtension extends MProvider {
             });
         } else {
             containers.forEach(container => {
-                const articles = container.select("article.elementor-post, article.post");
+                const articles = container.select("article.elementor-post");
                 const chaptersInContainer = articles.map(article => {
                     const a = article.selectFirst("h3.elementor-post__title a, h4.elementor-post__title a");
                     if (!a) return null;
@@ -172,7 +164,7 @@ class DefaultExtension extends MProvider {
                     };
                 }).filter(Boolean);
 
-                if (chaptersInContainer.length > 0) { // Cambiado de > 1 a > 0
+                if (chaptersInContainer.length > 1) {
                     allChapters.push(...chaptersInContainer);
                 }
             });
@@ -199,25 +191,15 @@ class DefaultExtension extends MProvider {
         const doc = new Document(res.body);
         const list = [];
         const processedLinks = new Set();
-        // Ampliamos los selectores para capturar más tipos de elementos de lista
-        const entryElements = doc.select("article.post, div.post-item, div.novel-item, div.elementor-post, div.site-content div.elementor-column-wrap");
+        const entryElements = doc.select("article.post, div.post-item, div.novel-item, div.elementor-post");
 
         for (const element of entryElements) {
             let link = element.selectFirst("a[data-wpel-link='internal']")?.getHref;
             if (!link) {
-                // Buscamos cualquier enlace que apunte a una novela
-                link = element.selectFirst("h2.entry-title a, h3.elementor-post__title a, .novel-title a")?.getHref;
-            }
-            if (!link) { // Ultimo intento por si hay un <a> directo
                 link = element.selectFirst("a[href*='devilnovels.com/']")?.getHref;
             }
 
-            // Intentamos obtener la imagen de varias ubicaciones posibles
-            let imageUrl = element.selectFirst("img")?.getSrc ||
-                element.selectFirst("div.elementor-widget-container img")?.getSrc ||
-                element.selectFirst("p img")?.getSrc ||
-                element.selectFirst("div.separator img")?.getSrc;
-
+            let imageUrl = element.selectFirst("img")?.getSrc;
             let name = element.selectFirst("h2.entry-title a, h3.entry-title a, .novel-title a, .elementor-post__title a")?.text.trim();
 
             if (!name) {
@@ -229,7 +211,6 @@ class DefaultExtension extends MProvider {
                 !link.includes('/tag/') && !link.includes('/author/') &&
                 !link.includes('/comments') && !name.includes('Capítulo') && !name.includes('Chapter')) {
                 // Asegurarse de que la imagen sea válida
-                // Validar la URL de la imagen. Si es nula, vacía o un data:image, usar el icono por defecto.
                 if (!imageUrl || imageUrl.startsWith("data:")) {
                     imageUrl = this.source.iconUrl;
                 }
@@ -243,8 +224,8 @@ class DefaultExtension extends MProvider {
     }
 
     toStatus(status) {
-        if (status.includes("En curso") || status.includes("Ongoing") || status.includes("Activo")) return 0;
-        else if (status.includes("Completado") || status.includes("Completed") || status.includes("Finalizado")) return 1;
+        if (status.includes("En curso") || status.includes("Ongoing")) return 0;
+        else if (status.includes("Completado") || status.includes("Completed")) return 1;
         else if (status.includes("Hiatus") || status.includes("Pausado")) return 2;
         else if (status.includes("Cancelado") || status.includes("Dropped")) return 3;
         else return 5;
@@ -287,40 +268,12 @@ class DefaultExtension extends MProvider {
         const initialDoc = new Document(initialRes.body);
 
         // Extraer detalles de novela si quieres (de momento los dejamos vacíos)
-        // --- Extracción de detalles de la novela ---
-        // Mejoramos la extracción de la descripción
-        const description = initialDoc.selectFirst("div.entry-content p, div.elementor-widget-theme-post-content p")?.text.trim() ||
-            initialDoc.selectFirst("meta[name='description']")?.attr("content") ||
-            "No se encontró descripción.";
-
-        // Extracción de imagen: Intentamos con varios selectores para mayor robustez
-        let imageUrl = initialDoc.selectFirst("div.elementor-widget-container img")?.getSrc ||
-            initialDoc.selectFirst("p img")?.getSrc ||
-            initialDoc.selectFirst("div.separator img")?.getSrc ||
-            initialDoc.selectFirst("article img")?.getSrc ||
-            initialDoc.selectFirst("div.post-content img")?.getSrc;
-
-        // Si la imageUrl es nula, vacía o un data:image, usar el icono por defecto.
-        if (!imageUrl || imageUrl.startsWith("data:")) {
-            imageUrl = this.source.iconUrl;
-        }
-
-        // Puedes añadir aquí la lógica para extraer género, autor, artista, estado
-        const genre = initialDoc.select("span.post-categories a, a[rel='tag']").map(e => e.text.trim()).filter(Boolean);
-        // Para autor y artista, necesitarías inspeccionar el HTML de una página de detalle para encontrar los selectores adecuados.
-        const author = initialDoc.selectFirst("span.author a")?.text.trim() || "";
-        const artist = ""; // No hay un selector claro para artista en los HTML de ejemplo, revisa la página.
-
-        // Extracción de status
-        let statusText = initialDoc.selectFirst("div.elementor-element:has(h2:contains(Estado)) + div.elementor-element-widget-text-editor div.elementor-widget-container")?.text.trim() ||
-            initialDoc.selectFirst("p:contains(Estado) strong")?.text.trim();
-        // Si el estado está dentro de un elemento fuerte, podemos intentar limpiarlo.
-        if (statusText && statusText.includes(":")) {
-            statusText = statusText.split(":")[1]?.trim();
-        }
-        const status = statusText ? this.toStatus(statusText) : 5; // Por defecto a "Desconocido"
-
-        // --- Fin de extracción de detalles ---
+        const genre = [];
+        const author = "";
+        const artist = "";
+        const status = 5;
+        const description = "";
+        const imageUrl = "";
 
         let validWidgetFound = false;
 
