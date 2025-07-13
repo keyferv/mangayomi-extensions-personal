@@ -323,7 +323,51 @@ class DefaultExtension extends MProvider {
         const url = `${this.source.baseUrl}/?s=${encodeURIComponent(query)}&paged=${page}`;
         const res = await new Client().get(url, this.headers);
         const doc = new Document(res.body);
-        return this._parseSearchResults(doc);
+
+        // Usar el mismo parser que funciona en mangaListFromPage
+        const list = [];
+        const processedLinks = new Set();
+
+        const entryElements = doc.select("article.post");
+
+        for (const element of entryElements) {
+            // 1. Detectar si es capítulo con categoría
+            const categoryLinkElement = element.selectFirst("span.cat-links a[data-wpel-link='internal']");
+            const isChapter = !!categoryLinkElement;
+
+            let novelName = "";
+            let novelLink = "";
+            let imageUrl = "";
+
+            if (isChapter) {
+                // ← CAPÍTULO, construir URL de novela
+                novelName = categoryLinkElement.text.trim();
+                const slug = this.slugify(novelName);
+                novelLink = `${this.source.baseUrl}/${slug}/`;
+
+                // Obtener portada desde la página principal de la novela
+                // ↓ Alternativamente, solo usar ícono por defecto para evitar más llamadas
+                imageUrl = this.source.iconUrl;
+            } else {
+                // ← ENTRADA DE NOVELA
+                const titleElement = element.selectFirst("h2.entry-title a");
+                const imgElement = element.selectFirst("img");
+                novelName = titleElement?.text.trim() || "";
+                novelLink = titleElement?.getHref;
+                imageUrl = imgElement?.getSrc || this.source.iconUrl;
+            }
+
+            if (novelLink && novelName && !processedLinks.has(novelLink) &&
+                !novelName.toLowerCase().includes("capítulo") && !novelName.toLowerCase().includes("chapter")) {
+                list.push({ name: novelName, imageUrl, link: novelLink });
+                processedLinks.add(novelLink);
+            }
+        }
+
+        const nextPageElement = doc.selectFirst("a.nextpostslink, .nav-links .next, .page-numbers .next");
+        const hasNextPage = nextPageElement !== null;
+
+        return { list, hasNextPage };
     }
 
     async getDetail(url) {
