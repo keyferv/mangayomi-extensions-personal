@@ -81,24 +81,38 @@ class DefaultExtension extends MProvider {
 
     _parseSearchResults(doc) {
         const list = [];
-        const processedLinks = new Set();
+        const processedLinks = new Set(); // Para evitar duplicados de novelas
+
+        // Cada resultado individual (capítulo o novela) está en un <article>
         const entryElements = doc.select("article.post");
 
         for (const element of entryElements) {
+            // Extraer el enlace de la categoría (que debería ser el enlace a la novela principal)
             const categoryLinkElement = element.selectFirst("span.ast-taxonomy-container.cat-links a[data-wpel-link='internal']");
             const novelLink = categoryLinkElement?.getHref;
-            const novelName = categoryLinkElement?.text.trim();
-            const imageUrl = "https://keyferv.github.io/mangayomi-extensions-personal/javascript/icon/es.devilnovels.png";
+            const novelName = categoryLinkElement?.text.trim(); // Este es el nombre de la NOVELA PRINCIPAL
 
+            // El problema es que en la búsqueda, Devil Novels no muestra la imagen de la novela,
+            // sino que la portada del capítulo es el mismo icono de Devil Novels o no hay.
+            // Por lo tanto, usaremos una imagen por defecto para las búsquedas.
+            const imageUrl = "https://keyferv.github.io/mangayomi-extensions-personal/javascript/icon/es.devilnovels.png"; // Imagen por defecto
+
+            // Asegurarse de que tenemos un nombre de novela principal y un enlace válido,
+            // y que no lo hayamos añadido ya (para evitar duplicados si varios capítulos de la misma novela aparecen).
             if (novelLink && novelName && !processedLinks.has(novelLink) &&
-                !novelName.includes('Capítulo') && !novelName.includes('Chapter')) {
+                !novelName.includes('Capítulo') && !novelName.includes('Chapter')) { // Filtra si por alguna razón el nombre de la categoría es un capítulo
+
                 list.push({ name: novelName, imageUrl: imageUrl, link: novelLink });
                 processedLinks.add(novelLink);
             }
         }
 
+        // --- Paginación para la búsqueda ---
+        // Necesitamos encontrar los selectores para la paginación en los resultados de búsqueda.
+        // Basado en sitios de WordPress, estos son algunos selectores comunes:
         const nextPageElement = doc.selectFirst("a.nextpostslink, .nav-links .next, .page-numbers .next");
         const hasNextPage = nextPageElement !== null;
+
         return { list: list, hasNextPage: hasNextPage };
     }
 
@@ -217,92 +231,113 @@ class DefaultExtension extends MProvider {
         const seenUrls = new Set();
         let repeatCount = 0;
 
-        const widgetId = 'bc939d8';
+        const fallbackWidgetId = "bc939d8"; // ← WidgetId fijo usado primero
+        let widgetId = fallbackWidgetId;
 
         console.log(`✨ Iniciando getDetail para URL: ${url}`);
 
-        // --- Extracción de detalles de la NOVELA (imagen y descripción) ---
+        // 1. Obtener la primera página
         const initialRes = await client.get(url, this.headers);
         const initialDoc = new Document(initialRes.body);
 
-        const description = initialDoc.selectFirst("div.elementor-widget-theme-post-content.elementor-widget p")?.text.trim() ||
-                            initialDoc.selectFirst("div.entry-content p")?.text.trim() ||
-                            initialDoc.selectFirst("meta[name='description']")?.attr("content") ||
-                            "";
-
-        const imageUrl = initialDoc.selectFirst("div.elementor-element-26a9788 img")?.getSrc ||
-                         initialDoc.selectFirst("meta[property='og:image']")?.attr("content") ||
-                         "https://keyferv.github.io/mangayomi-extensions-personal/javascript/icon/es.devilnovels.png";
-
-        // Dejar estos campos explícitamente vacíos para evitar problemas
+        // Extraer detalles de novela si quieres (de momento los dejamos vacíos)
         const genre = [];
         const author = "";
         const artist = "";
-        const status = 5; // Estado "Desconocido" por defecto
+        const status = 5;
+        const description = "";
+        const imageUrl = "";
 
-        // --- Bucle para recopilar capítulos ---
-        for (let page = 1; page <= MAX_PAGES; page++) {
-            const pageUrl = page === 1
-                ? url.replace(/\/$/, '')
-                : `${url.replace(/\/$/, '')}/?e-page=${widgetId}&page=${page}`;
+        let validWidgetFound = false;
 
-            console.log(`🌐 Solicitando página de capítulos ${page}: ${pageUrl}`);
+        for (let attempt = 0; attempt < 2 && !validWidgetFound; attempt++) {
+            // Si el intento anterior falló, recuperar dinámicamente el widgetId
+            if (attempt === 1) {
+                const match = initialRes.body.match(/<div[^>]+class="[^"]*elementor-widget-posts[^"]*"[^>]+data-id="([a-z0-9]+)"/);
+                widgetId = match ? match[1] : null;
 
-            try {
-                const res = await client.get(pageUrl, this.headers);
-                const doc = new Document(res.body);
-
-                const chaptersOnPage = this._parseChaptersFromPage(doc);
-
-                if (chaptersOnPage.length === 0) {
-                    console.warn(`⚠️ Página ${page} vacía o no se encontraron capítulos válidos. Terminando...`);
+                if (!widgetId) {
+                    console.warn("❌ No se pudo obtener widgetId dinámicamente. Cancelando.");
                     break;
                 }
 
-                let addedToCurrentBatch = 0;
-                for (const ch of chaptersOnPage) {
-                    if (seenUrls.has(ch.url)) {
-                        repeatCount++;
-                        if (repeatCount >= REPEAT_LIMIT) {
-                            console.warn(`🛑 Demasiados capítulos repetidos. Terminando la paginación.`);
-                            break;
+                console.log(`🔁 Usando widgetId dinámico: ${widgetId}`);
+            }
+
+            // Paginación
+            for (let page = 1; page <= MAX_PAGES; page++) {
+                const pageUrl = page === 1
+                    ? url.replace(/\/$/, '')
+                    : `${url.replace(/\/$/, '')}/?e-page=${widgetId}&page=${page}`;
+
+                console.log(`🌐 Solicitando página de capítulos ${page}: ${pageUrl}`);
+
+                try {
+                    const res = await client.get(pageUrl, this.headers);
+                    const doc = new Document(res.body);
+
+                    const chaptersOnPage = this._parseChaptersFromPage(doc);
+                    if (chaptersOnPage.length === 0) {
+                        console.warn(`⚠️ Página ${page} vacía. Intento: ${attempt}`);
+                        if (page === 1 && attempt === 0) {
+                            // ← Falló en el primer intento con widget fijo
+                            break; // salta al segundo intento
+                        } else {
+                            return {
+                                imageUrl,
+                                description,
+                                genre,
+                                author,
+                                artist,
+                                status,
+                                chapters: allChapters
+                            };
                         }
-                    } else {
-                        repeatCount = 0;
-                        seenUrls.add(ch.url);
-                        allChapters.push(ch);
-                        addedToCurrentBatch++;
                     }
-                }
 
-                if (repeatCount >= REPEAT_LIMIT || addedToCurrentBatch === 0) {
+                    validWidgetFound = true;
+
+                    let added = 0;
+                    for (const ch of chaptersOnPage) {
+                        if (seenUrls.has(ch.url)) {
+                            repeatCount++;
+                            if (repeatCount >= REPEAT_LIMIT) {
+                                console.warn("🛑 Demasiados capítulos repetidos. Terminando...");
+                                break;
+                            }
+                        } else {
+                            repeatCount = 0;
+                            seenUrls.add(ch.url);
+                            allChapters.push(ch);
+                            added++;
+                        }
+                    }
+
+                    if (repeatCount >= REPEAT_LIMIT || added === 0) break;
+                    await new Promise(resolve => setTimeout(resolve, 300));
+
+                } catch (err) {
+                    console.error(`❌ Error cargando página ${page}:`, err);
                     break;
                 }
-
-                await new Promise(resolve => setTimeout(resolve, 300));
-
-            } catch (error) {
-                console.error(`❌ Error al obtener capítulos de la página ${page}:`, error);
-                break;
             }
         }
 
         allChapters.sort((a, b) => {
             const numA = parseFloat(a.name.match(/(\d+(\.\d+)?)/)?.[1] || 0);
             const numB = parseFloat(b.name.match(/(\d+(\.\d+)?)/)?.[1] || 0);
-            if (numA !== numB) return numA - numB;
-            return a.name.localeCompare(b.name);
+            return numA !== numB ? numA - numB : a.name.localeCompare(b.name);
         });
 
-        console.log(`✅ Total de capítulos recopilados para la novela: ${allChapters.length}`);
+        console.log(`✅ Total capítulos: ${allChapters.length}`);
 
         return {
-            imageUrl: imageUrl,
-            description: description,
-            genre: genre,
-            author: author,
-            artist: artist,
-            status: status,
+            imageUrl,
+            description,
+            genre,
+            author,
+            artist,
+            status,
             chapters: allChapters
         };
     }
@@ -323,15 +358,15 @@ class DefaultExtension extends MProvider {
         const cleanTitle = title.replace(/ - Devilnovels$/i, "").trim();
 
         let content = doc.selectFirst("div.elementor-widget-theme-post-content.elementor-widget")?.innerHtml ||
-                      doc.selectFirst("div.entry-content")?.innerHtml ||
-                      doc.selectFirst("div.post-content")?.innerHtml ||
-                      doc.selectFirst("div.chapter-content")?.innerHtml ||
-                      doc.selectFirst("article .content")?.innerHtml ||
-                      doc.selectFirst("main .content")?.innerHtml ||
-                      doc.selectFirst("div.content")?.innerHtml || "";
+            doc.selectFirst("div.entry-content")?.innerHtml ||
+            doc.selectFirst("div.post-content")?.innerHtml ||
+            doc.selectFirst("div.chapter-content")?.innerHtml ||
+            doc.selectFirst("article .content")?.innerHtml ||
+            doc.selectFirst("main .content")?.innerHtml ||
+            doc.selectFirst("div.content")?.innerHtml || "";
 
         if (!content || content.length < 50) {
-             content = doc.selectFirst("meta[name='description']")?.attr("content") || "";
+            content = doc.selectFirst("meta[name='description']")?.attr("content") || "";
         }
 
         const cleanContent = content
@@ -356,8 +391,7 @@ class DefaultExtension extends MProvider {
                     !text.toLowerCase().includes("este capítulo ha sido traducido por") &&
                     !text.toLowerCase().includes("no se permite la reproducción total") &&
                     !text.toLowerCase().includes("puedes leer más capítulos") &&
-                    !p.outerHtml.includes('elementor'))
-                {
+                    !p.outerHtml.includes('elementor')) {
                     extractedContent += `<p>${text}</p>\n`;
                 }
             }
