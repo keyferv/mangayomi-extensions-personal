@@ -94,60 +94,98 @@ class DefaultExtension extends MProvider {
     }
 
     // ...existing code...
+
     _parseSearchResults(doc) {
         const list = [];
         const processedLinks = new Set();
-        const entryElements = doc.select("article.post, div.post-item, div.novel-item, div.elementor-post");
+
+        // CORREGIDO: Selector más amplio para capturar todos los tipos de artículos
+        const entryElements = doc.select("article.post, article.page, article[class*='post-']");
 
         for (const element of entryElements) {
-            let link = element.selectFirst("a[data-wpel-link='internal']")?.getHref;
-            if (!link) {
-                link = element.selectFirst("a[href*='devilnovels.com/']")?.getHref;
-            }
+            // 1. Primero intentar detectar si es entrada directa de novela
+            const titleElement = element.selectFirst("h2.entry-title a");
+            const imgElement = element.selectFirst("img");
 
-            let imageUrl = element.selectFirst("img")?.getSrc;
-            let name = element.selectFirst("h2.entry-title a, h3.entry-title a, .novel-title a, .elementor-post__title a")?.text.trim();
+            let novelName = titleElement?.text.trim() || "";
+            let novelLink = titleElement?.getHref;
+            let imageUrl = imgElement?.getSrc || this.source.iconUrl;
 
-            if (!name) {
-                name = element.selectFirst("a")?.text.trim();
-            }
+            // 2. Si tenemos entrada directa válida, procesarla
+            if (novelLink && novelName &&
+                !novelName.toLowerCase().includes("capítulo") &&
+                !novelName.toLowerCase().includes("chapter") &&
+                !novelLink.includes('/category/') &&
+                !novelLink.includes('/tag/') &&
+                !novelLink.includes('/author/') &&
+                !novelLink.includes('/page/') &&
+                !processedLinks.has(novelLink)) {
 
-            // NUEVO: Detectar si es un capítulo y convertirlo a novela
-            const isChapter = name && (name.toLowerCase().includes('capítulo') || name.toLowerCase().includes('chapter'));
-
-            if (isChapter) {
-                // Extraer el nombre de la novela del título del capítulo
-                const novelName = this._extractNovelNameFromChapter(name);
-                const novelLink = this._buildNovelLinkFromChapter(link);
-
-                if (novelName && novelLink && !processedLinks.has(novelLink)) {
-                    list.push({
-                        name: novelName,
-                        imageUrl: imageUrl || this.source.iconUrl,
-                        link: novelLink
-                    });
-                    processedLinks.add(novelLink);
+                // Validar imagen
+                if (!imageUrl || imageUrl.startsWith("data:")) {
+                    imageUrl = this.source.iconUrl;
                 }
-            } else {
-                // Es una entrada de novela normal
-                if (link && name && !processedLinks.has(link) &&
-                    !link.includes('/page/') && !link.includes('/category/') &&
-                    !link.includes('/tag/') && !link.includes('/author/') &&
-                    !link.includes('/comments')) {
 
-                    if (!imageUrl || imageUrl.startsWith("data:")) {
-                        imageUrl = this.source.iconUrl;
+                list.push({ name: novelName, imageUrl, link: novelLink });
+                processedLinks.add(novelLink);
+                continue; // Saltar al siguiente elemento
+            }
+
+            // 3. Si no es entrada directa, verificar si es capítulo con categoría
+            const categoryLinkElement = element.selectFirst("span.cat-links a[data-wpel-link='internal']");
+            if (categoryLinkElement) {
+                const categoryName = categoryLinkElement.text.trim();
+                const categoryHref = categoryLinkElement.getHref;
+
+                if (categoryHref && categoryHref.includes('/category/')) {
+                    const categorySlug = categoryHref.split('/category/')[1].replace('/', '');
+
+                    // Mapeo manual para casos conocidos
+                    const slugMappings = {
+                        'chaotic-sword-god': 'Chaotic-Sword-God',
+                        'the-main-heroines-are-trying-to-kill-me': 'las-heroinas-principales-estan-tratando-de-matarme',
+                        'sovereign-of-the-three-realms': 'soberano-de-los-tres-reinos',
+                        'emperors-domination': 'emperors-dominacion',
+                        'tales-of-demons-and-gods': 'historia-de-demonios-y-dioses'
+                    };
+
+                    const mappedSlug = slugMappings[categorySlug] || categorySlug;
+                    const novelLinkFromCategory = `${this.source.baseUrl}/${mappedSlug}/`;
+
+                    // Intentar extraer nombre en español del título del capítulo
+                    const chapterTitleElement = element.selectFirst("h2.entry-title a");
+                    let extractedNovelName = categoryName;
+
+                    if (chapterTitleElement) {
+                        const chapterTitle = chapterTitleElement.text.trim();
+                        const extracted = this._extractNovelNameFromChapter(chapterTitle);
+                        if (extracted && extracted.length > categoryName.length) {
+                            extractedNovelName = extracted;
+                        }
                     }
 
-                    list.push({ name, imageUrl, link });
-                    processedLinks.add(link);
+                    if (!processedLinks.has(novelLinkFromCategory) &&
+                        !extractedNovelName.toLowerCase().includes("capítulo") &&
+                        !extractedNovelName.toLowerCase().includes("chapter")) {
+
+                        list.push({
+                            name: extractedNovelName,
+                            imageUrl: this.source.iconUrl,
+                            link: novelLinkFromCategory
+                        });
+                        processedLinks.add(novelLinkFromCategory);
+                    }
                 }
             }
         }
 
-        const hasNextPage = doc.selectFirst("a.nextpostslink, a.next, .nav-links .next, .elementor-pagination .elementor-pagination__next") !== null;
+        const nextPageElement = doc.selectFirst("a.nextpostslink, .nav-links .next, .page-numbers .next");
+        const hasNextPage = nextPageElement !== null;
+
         return { list, hasNextPage };
     }
+
+    // ...existing code...
 
     // Función auxiliar para extraer el nombre de la novela del título del capítulo
     _extractNovelNameFromChapter(chapterTitle) {
@@ -321,6 +359,8 @@ class DefaultExtension extends MProvider {
 
     // ...existing code...
 
+    // ...existing code...
+
     async search(query, page, filters) {
         const url = `${this.source.baseUrl}/?s=${encodeURIComponent(query)}&paged=${page}`;
         const res = await new Client().get(url, this.headers);
@@ -340,25 +380,46 @@ class DefaultExtension extends MProvider {
             let imageUrl = "";
 
             if (isChapter) {
-                // ← CAPÍTULO, construir URL de novela CORREGIDA
-                novelName = categoryLinkElement.text.trim();
-
-                // CORREGIDO: No usar slugify, extraer directamente del href de la categoría
+                // ← CAPÍTULO, necesitamos convertir category URL a novela URL
                 const categoryHref = categoryLinkElement.getHref;
-                // Ejemplo: "https://devilnovels.com/category/chaotic-sword-god/" 
-                // -> "https://devilnovels.com/chaotic-sword-god/"
+
+                // Extraer el slug de la categoría
                 if (categoryHref && categoryHref.includes('/category/')) {
                     const categorySlug = categoryHref.split('/category/')[1].replace('/', '');
-                    novelLink = `${this.source.baseUrl}/${categorySlug}/`;
+
+                    // NUEVO: Mapeo manual para casos conocidos problemáticos
+                    const slugMappings = {
+                        'chaotic-sword-god': 'Chaotic-Sword-God',
+                        'the-main-heroines-are-trying-to-kill-me': 'las-heroinas-principales-estan-tratando-de-matarme',
+                        'sovereign-of-the-three-realms': 'soberano-de-los-tres-reinos',
+                        'emperors-domination': 'emperors-dominacion'
+                    };
+
+                    const mappedSlug = slugMappings[categorySlug] || categorySlug;
+                    novelLink = `${this.source.baseUrl}/${mappedSlug}/`;
+
+                    // Usar el nombre en español si existe, sino el de la categoría
+                    novelName = categoryLinkElement.text.trim();
+
+                    // NUEVO: Intentar obtener nombre en español desde el título del capítulo
+                    const chapterTitleElement = element.selectFirst("h2.entry-title a");
+                    if (chapterTitleElement) {
+                        const chapterTitle = chapterTitleElement.text.trim();
+                        const extractedNovelName = this._extractNovelNameFromChapter(chapterTitle);
+                        if (extractedNovelName && extractedNovelName.length > novelName.length) {
+                            novelName = extractedNovelName;
+                        }
+                    }
                 } else {
-                    // Fallback al método anterior si no funciona
+                    // Fallback al método anterior
+                    novelName = categoryLinkElement.text.trim();
                     const slug = this.slugify(novelName);
                     novelLink = `${this.source.baseUrl}/${slug}/`;
                 }
 
                 imageUrl = this.source.iconUrl;
             } else {
-                // ← ENTRADA DE NOVELA DIRECTA (este era el problema - no se incluían)
+                // ← ENTRADA DE NOVELA DIRECTA
                 const titleElement = element.selectFirst("h2.entry-title a");
                 const imgElement = element.selectFirst("img");
                 novelName = titleElement?.text.trim() || "";
@@ -366,13 +427,14 @@ class DefaultExtension extends MProvider {
                 imageUrl = imgElement?.getSrc || this.source.iconUrl;
             }
 
-            // CORREGIDO: Validación mejorada para incluir AMBOS tipos
+            // Validación mejorada
             if (novelLink && novelName && !processedLinks.has(novelLink) &&
                 !novelName.toLowerCase().includes("capítulo") &&
                 !novelName.toLowerCase().includes("chapter") &&
                 !novelLink.includes('/tag/') &&
                 !novelLink.includes('/author/') &&
-                !novelLink.includes('/page/')) {
+                !novelLink.includes('/page/') &&
+                !novelLink.includes('/category/')) { // Excluir URLs de categorías que no se pudieron convertir
 
                 list.push({ name: novelName, imageUrl, link: novelLink });
                 processedLinks.add(novelLink);
@@ -384,6 +446,37 @@ class DefaultExtension extends MProvider {
 
         return { list, hasNextPage };
     }
+
+    // MEJORAR la función _extractNovelNameFromChapter para manejar mejor los títulos
+    _extractNovelNameFromChapter(chapterTitle) {
+        // Ejemplos: "Las Heroínas Principales Están Tratando de Matarme Capitulo 517.2"
+        // -> "Las Heroínas Principales Están Tratando de Matarme"
+
+        const patterns = [
+            /^(.+?)\s+capítulo\s+[\d.]+/i,
+            /^(.+?)\s+chapter\s+[\d.]+/i,
+            /^(.+?)\s+cap\s+[\d.]+/i,
+            /^(.+?)\s+episodio\s+[\d.]+/i,
+            /^(.+?)\s+\d+[\d.]*$/i  // Patrón para títulos que terminan solo en número
+        ];
+
+        for (const pattern of patterns) {
+            const match = chapterTitle.match(pattern);
+            if (match) {
+                return match[1].trim();
+            }
+        }
+
+        // Fallback: tomar todo antes del último número
+        const numberMatch = chapterTitle.match(/(.+?)\s+[\d.]+\s*$/);
+        if (numberMatch) {
+            return numberMatch[1].trim();
+        }
+
+        return chapterTitle;
+    }
+
+    // ...existing code...
 
     // ...existing code...
     async getDetail(url) {
