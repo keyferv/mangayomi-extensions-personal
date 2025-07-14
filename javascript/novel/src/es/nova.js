@@ -6,13 +6,13 @@ const mangayomiSources = [{
     "iconUrl": "https://keyferv.github.io/mangayomi-extensions-personal/javascript/icon/es.nova.png",
     "typeSource": "single",
     "itemType": 2,
-    "version": "0.0.7",
+    "version": "0.0.8",
     "dateFormat": "",
     "dateFormatLocale": "",
     "pkgPath": "novel/src/es/nova.js",
     "isNsfw": false,
     "hasCloudflare": true,
-    "notes": "Extensión para NovelasLigeras.net con técnicas Patchright-inspired: anti-detección avanzada, fingerprinting realista, timing humano y estrategias progresivas contra Cloudflare Turnstile"
+    "notes": "Extensión para NovelasLigeras.net con técnicas Patchright-inspired: anti-detección avanzada, fingerprinting realista, timing humano, estrategias progresivas contra Cloudflare Turnstile y soporte opcional para cookie cf_clearance manual"
 }];
 
 class DefaultExtension extends MProvider {
@@ -251,6 +251,13 @@ class DefaultExtension extends MProvider {
         if (isChrome && !isFirefox) {
             const clientHints = this._generateClientHints(userAgent, isMobile);
             Object.assign(headers, clientHints);
+        }
+
+        // Cookie cf_clearance manual si está disponible
+        const cfCookie = this.getPreferenceValue("cf_cookie");
+        if (cfCookie && cfCookie.trim().length > 0 && this._isValidCfClearanceCookie(cfCookie.trim())) {
+            headers["Cookie"] = `cf_clearance=${cfCookie.trim()}`;
+            console.log("🍪 Incluyendo cookie cf_clearance manual en headers de bypass");
         }
 
         // Cache control estratégico
@@ -628,6 +635,33 @@ class DefaultExtension extends MProvider {
      * Función principal para bypass de Cloudflare con estrategias múltiples móvil-primero
      */
     async _fetchWithCloudflareHandling(url, options = {}) {
+        // Si el usuario tiene una cookie cf_clearance válida, intentar usarla primero
+        if (this._hasValidManualCookie()) {
+            console.log("🍪 Detectada cookie cf_clearance manual. Intentando acceso directo...");
+            
+            try {
+                const directHeaders = this.getHeaders(url);
+                const client = new Client({
+                    timeout: 15000,
+                    followRedirects: true,
+                    maxRedirects: 3
+                });
+                
+                const response = await client.get(url, directHeaders);
+                const check = this._detectModernCloudflare(response);
+                
+                if (!check.isBlocked) {
+                    console.log("✅ Acceso exitoso usando cookie cf_clearance manual");
+                    return response;
+                } else {
+                    console.warn("⚠️ Cookie cf_clearance manual falló, procediendo con bypass automático...");
+                }
+            } catch (error) {
+                console.warn("⚠️ Error con cookie manual, procediendo con bypass automático:", error.message);
+            }
+        }
+        
+        // Continuar con el bypass automático existente
         return await this._fetchWithAdvancedBypass(url, options);
     }
     
@@ -981,11 +1015,75 @@ class DefaultExtension extends MProvider {
     }
 
     getSourcePreferences() {
-        return [];
+        return [
+            {
+                type_name: "TextPref",
+                key: "cf_cookie",
+                label: "Cookie cf_clearance",
+                description: "Pega aquí tu cookie 'cf_clearance' obtenida manualmente desde tu navegador o WebView.",
+                defaultValue: ""
+            }
+        ];
     }
 
     getHeaders(url) {
-        return this.headers;
+        // Clonar headers base para no modificar el original
+        const headers = { ...this.headers };
+        
+        // Verificar si el usuario ha proporcionado una cookie cf_clearance manual
+        const cfCookie = this.getPreferenceValue("cf_cookie");
+        
+        if (cfCookie && cfCookie.trim().length > 0) {
+            // Validar formato básico de la cookie
+            const cookieValue = cfCookie.trim();
+            if (this._isValidCfClearanceCookie(cookieValue)) {
+                headers["Cookie"] = `cf_clearance=${cookieValue}`;
+                console.log("🍪 Usando cookie cf_clearance manual proporcionada por el usuario");
+            } else {
+                console.warn("⚠️ Cookie cf_clearance inválida en configuración. Formato esperado: cadena alfanumérica larga.");
+            }
+        }
+        
+        return headers;
+    }
+
+    /**
+     * Obtiene el valor de una preferencia del usuario
+     */
+    getPreferenceValue(key) {
+        // Esta función será implementada por el framework Mangayomi
+        // En el contexto real, obtendrá el valor guardado por el usuario
+        try {
+            // Usar la API de preferencias del framework si está disponible
+            if (typeof getPreferenceValue !== 'undefined') {
+                return getPreferenceValue(key);
+            }
+            // Fallback para testing/desarrollo
+            return "";
+        } catch (error) {
+            console.warn(`Error obteniendo preferencia ${key}:`, error);
+            return "";
+        }
+    }
+
+    /**
+     * Verifica si el usuario tiene configurada una cookie cf_clearance válida
+     */
+    _hasValidManualCookie() {
+        const cfCookie = this.getPreferenceValue("cf_cookie");
+        return cfCookie && cfCookie.trim().length > 0 && this._isValidCfClearanceCookie(cfCookie.trim());
+    }
+
+    /**
+     * Valida formato básico de cookie cf_clearance
+     */
+    _isValidCfClearanceCookie(cookie) {
+        // cf_clearance típicamente es una cadena larga alfanumérica
+        // Ejemplo: "1a2b3c4d5e6f7g8h9i0j_k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6"
+        return cookie && 
+               cookie.length >= 20 && 
+               cookie.length <= 200 &&
+               /^[a-zA-Z0-9._-]+$/.test(cookie);
     }
 
     // ==================== PATCHRIGHT-INSPIRED ANTI-DETECTION ====================
