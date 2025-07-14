@@ -11,8 +11,8 @@ const mangayomiSources = [{
     "dateFormatLocale": "",
     "pkgPath": "novel/src/es/nova.js",
     "isNsfw": false,
-    "hasCloudflare": true, // ✅ Mejorado con manejo inteligente de Cloudflare
-    "notes": "Extensión para NovelasLigeras.net con manejo avanzado de Cloudflare, reintentos automáticos y delays progresivos"
+    "hasCloudflare": true,
+    "notes": "Extensión para NovelasLigeras.net con icono personalizado y manejo avanzado de Cloudflare"
 }];
 
 class DefaultExtension extends MProvider {
