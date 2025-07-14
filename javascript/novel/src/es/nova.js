@@ -6,7 +6,7 @@ const mangayomiSources = [{
     "iconUrl": "https://keyferv.github.io/mangayomi-extensions-personal/javascript/icon/es.nova.png",
     "typeSource": "single",
     "itemType": 2,
-    "version": "0.0.8",
+    "version": "0.0.9",
     "dateFormat": "",
     "dateFormatLocale": "",
     "pkgPath": "novel/src/es/nova.js",
@@ -253,11 +253,11 @@ class DefaultExtension extends MProvider {
             Object.assign(headers, clientHints);
         }
 
-        // Cookie cf_clearance manual si está disponible
-        const cfCookie = this.getPreferenceValue("cf_cookie");
-        if (cfCookie && cfCookie.trim().length > 0 && this._isValidCfClearanceCookie(cfCookie.trim())) {
-            headers["Cookie"] = `cf_clearance=${cfCookie.trim()}`;
-            console.log("🍪 Incluyendo cookie cf_clearance manual en headers de bypass");
+        // Cookie cf_clearance manual si está disponible (MEJORADO)
+        const cleanCookie = this._getCleanManualCookie();
+        if (cleanCookie && cleanCookie.length > 0) {
+            headers["Cookie"] = `cf_clearance=${cleanCookie}`;
+            console.log(`🍪 Incluyendo cookie cf_clearance manual en headers de bypass (${cleanCookie.length} chars)`);
         }
 
         // Cache control estratégico
@@ -632,12 +632,13 @@ class DefaultExtension extends MProvider {
     }
     
     /**
-     * Función principal para bypass de Cloudflare con estrategias múltiples móvil-primero
+     * Función principal para bypass de Cloudflare con estrategias múltiples móvil-primero (mejorado)
      */
     async _fetchWithCloudflareHandling(url, options = {}) {
         // Si el usuario tiene una cookie cf_clearance válida, intentar usarla primero
         if (this._hasValidManualCookie()) {
-            console.log("🍪 Detectada cookie cf_clearance manual. Intentando acceso directo...");
+            const cleanCookie = this._getCleanManualCookie();
+            console.log(`🍪 Detectada cookie cf_clearance manual válida (${cleanCookie.length} chars). Intentando acceso directo...`);
             
             try {
                 const directHeaders = this.getHeaders(url);
@@ -654,14 +655,21 @@ class DefaultExtension extends MProvider {
                     console.log("✅ Acceso exitoso usando cookie cf_clearance manual");
                     return response;
                 } else {
-                    console.warn("⚠️ Cookie cf_clearance manual falló, procediendo con bypass automático...");
+                    console.warn(`⚠️ Cookie cf_clearance manual falló (${check.type} - ${check.status}), procediendo con bypass automático...`);
                 }
             } catch (error) {
                 console.warn("⚠️ Error con cookie manual, procediendo con bypass automático:", error.message);
             }
+        } else {
+            const rawCookie = this.getPreferenceValue("cf_cookie");
+            if (rawCookie && rawCookie.trim().length > 0) {
+                console.warn(`⚠️ Cookie cf_clearance configurada pero inválida: "${rawCookie.substring(0, 30)}..." (longitud: ${rawCookie.length})`);
+                console.warn("💡 Asegúrate de pegar solo el valor de la cookie, sin comillas ni espacios extras.");
+            }
         }
         
         // Continuar con el bypass automático existente
+        console.log("🤖 Iniciando bypass automático...");
         return await this._fetchWithAdvancedBypass(url, options);
     }
     
@@ -1020,7 +1028,7 @@ class DefaultExtension extends MProvider {
                 type_name: "TextPref",
                 key: "cf_cookie",
                 label: "Cookie cf_clearance",
-                description: "Pega aquí tu cookie 'cf_clearance' obtenida manualmente desde tu navegador o WebView.",
+                description: "Pega aquí SOLO EL VALOR de tu cookie 'cf_clearance' (sin comillas ni espacios). Ejemplo: abc123def456...",
                 defaultValue: ""
             }
         ];
@@ -1031,17 +1039,11 @@ class DefaultExtension extends MProvider {
         const headers = { ...this.headers };
         
         // Verificar si el usuario ha proporcionado una cookie cf_clearance manual
-        const cfCookie = this.getPreferenceValue("cf_cookie");
+        const cleanCookie = this._getCleanManualCookie();
         
-        if (cfCookie && cfCookie.trim().length > 0) {
-            // Validar formato básico de la cookie
-            const cookieValue = cfCookie.trim();
-            if (this._isValidCfClearanceCookie(cookieValue)) {
-                headers["Cookie"] = `cf_clearance=${cookieValue}`;
-                console.log("🍪 Usando cookie cf_clearance manual proporcionada por el usuario");
-            } else {
-                console.warn("⚠️ Cookie cf_clearance inválida en configuración. Formato esperado: cadena alfanumérica larga.");
-            }
+        if (cleanCookie && cleanCookie.length > 0) {
+            headers["Cookie"] = `cf_clearance=${cleanCookie}`;
+            console.log(`🍪 Usando cookie cf_clearance manual (${cleanCookie.length} chars): ${cleanCookie.substring(0, 20)}...`);
         }
         
         return headers;
@@ -1075,15 +1077,72 @@ class DefaultExtension extends MProvider {
     }
 
     /**
-     * Valida formato básico de cookie cf_clearance
+     * Valida formato básico de cookie cf_clearance (mejorado)
      */
     _isValidCfClearanceCookie(cookie) {
-        // cf_clearance típicamente es una cadena larga alfanumérica
+        if (!cookie || typeof cookie !== 'string') {
+            return false;
+        }
+        
+        // Limpiar automáticamente comillas y espacios
+        const cleanedCookie = cookie.trim().replace(/^["']|["']$/g, '');
+        
+        // cf_clearance típicamente es una cadena larga alfanumérica con algunos caracteres especiales
         // Ejemplo: "1a2b3c4d5e6f7g8h9i0j_k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6"
-        return cookie && 
-               cookie.length >= 20 && 
-               cookie.length <= 200 &&
-               /^[a-zA-Z0-9._-]+$/.test(cookie);
+        const isValidLength = cleanedCookie.length >= 20 && cleanedCookie.length <= 200;
+        const isValidFormat = /^[a-zA-Z0-9._-]+$/.test(cleanedCookie);
+        
+        console.log(`🍪 Validando cookie: longitud=${cleanedCookie.length}, formato=${isValidFormat}`);
+        
+        return isValidLength && isValidFormat;
+    }
+
+    /**
+     * Limpia y normaliza la cookie cf_clearance
+     */
+    _cleanCfClearanceCookie(cookie) {
+        if (!cookie) return "";
+        
+        // Quitar comillas, espacios y caracteres extraños
+        return cookie.trim()
+                     .replace(/^["']|["']$/g, '')  // Quitar comillas de inicio/fin
+                     .replace(/\s/g, '')           // Quitar espacios
+                     .replace(/[^\w._-]/g, '');    // Quitar caracteres no válidos
+    }
+
+    /**
+     * Verifica si el usuario tiene configurada una cookie cf_clearance válida (mejorado)
+     */
+    _hasValidManualCookie() {
+        const cfCookie = this.getPreferenceValue("cf_cookie");
+        if (!cfCookie || cfCookie.trim().length === 0) {
+            return false;
+        }
+        
+        const cleanedCookie = this._cleanCfClearanceCookie(cfCookie);
+        const isValid = this._isValidCfClearanceCookie(cleanedCookie);
+        
+        if (!isValid) {
+            console.warn(`⚠️ Cookie cf_clearance inválida: "${cfCookie.substring(0, 20)}..." (longitud: ${cfCookie.length})`);
+        }
+        
+        return isValid;
+    }
+
+    /**
+     * Obtiene la cookie cf_clearance limpia y validada
+     */
+    _getCleanManualCookie() {
+        const cfCookie = this.getPreferenceValue("cf_cookie");
+        if (!cfCookie) return "";
+        
+        const cleanedCookie = this._cleanCfClearanceCookie(cfCookie);
+        
+        if (this._isValidCfClearanceCookie(cleanedCookie)) {
+            return cleanedCookie;
+        }
+        
+        return "";
     }
 
     // ==================== PATCHRIGHT-INSPIRED ANTI-DETECTION ====================
