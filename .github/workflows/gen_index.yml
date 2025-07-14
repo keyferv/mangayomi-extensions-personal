@@ -5,6 +5,10 @@ on:
     branches:
       - main
 
+permissions:
+  contents: write  # Permite escribir en el repositorio
+  actions: read   # Permite leer acciones
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -12,6 +16,8 @@ jobs:
     steps:
       - name: Checkout 
         uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Dart
         uses: dart-lang/setup-dart@9a04e6d73cca37bd455e0608d7e5092f881fd603
@@ -32,5 +38,5 @@ jobs:
             echo "No changes detected, skipping commit."
           else
             git commit -m "Update extensions"
-            git push origin main --force
+            git push origin main
           fi
