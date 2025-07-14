@@ -6,25 +6,32 @@ const mangayomiSources = [{
     "iconUrl": "https://novelasligeras.net/wp-content/uploads/2021/04/cropped-logo-novelasligeras-32x32.png",
     "typeSource": "single",
     "itemType": 2,
-    "version": "0.0.2",
+    "version": "0.0.3",
     "dateFormat": "",
     "dateFormatLocale": "",
     "pkgPath": "novel/src/es/nova.js",
     "isNsfw": false,
-    "hasCloudflare": true, // Basado en los headers que veo
-    "notes": "Extensión para NovelasLigeras.net"
+    "hasCloudflare": true, // ✅ Mejorado con manejo inteligente de Cloudflare
+    "notes": "Extensión para NovelasLigeras.net con manejo avanzado de Cloudflare, reintentos automáticos y delays progresivos"
 }];
 
 class DefaultExtension extends MProvider {
     headers = {
-        Referer: this.source.baseUrl,
-        Origin: this.source.baseUrl,
-        Connection: "keep-alive",
-        Accept: "*/*",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
         "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
-        "Sec-Fetch-Mode": "cors",
-        "Accept-Encoding": "gzip, deflate",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Referer": this.source.baseUrl,
+        "Origin": this.source.baseUrl,
+        "Connection": "keep-alive",
+        "Upgrade-Insecure-Requests": "1",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "same-origin",
+        "Sec-Ch-Ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+        "Sec-Ch-Ua-Mobile": "?0",
+        "Sec-Ch-Ua-Platform": '"Windows"',
+        "Cache-Control": "max-age=0"
     };
 
     _parseLatestUpdatesList(doc) {
@@ -120,6 +127,66 @@ class DefaultExtension extends MProvider {
     }
 
     // ==================== FUNCIONES AUXILIARES ====================
+    
+    /**
+     * Función para manejar Cloudflare con reintentos y delays
+     */
+    async _fetchWithCloudflareHandling(url, options = {}) {
+        const maxRetries = 3;
+        const delays = [2000, 5000, 10000]; // 2s, 5s, 10s
+        
+        for (let attempt = 0; attempt < maxRetries; attempt++) {
+            try {
+                console.log(`🌐 Intento ${attempt + 1}/${maxRetries} para: ${url}`);
+                
+                // Añadir delay progresivo para evitar rate limiting
+                if (attempt > 0) {
+                    console.log(`⏳ Esperando ${delays[attempt - 1]}ms antes del siguiente intento...`);
+                    await this._delay(delays[attempt - 1]);
+                }
+                
+                // Headers más completos para simular navegador real
+                const enhancedHeaders = {
+                    ...this.headers,
+                    "Cache-Control": attempt === 0 ? "no-cache" : "max-age=300",
+                    "Pragma": attempt === 0 ? "no-cache" : undefined
+                };
+                
+                const client = new Client();
+                const res = await client.get(url, enhancedHeaders);
+                
+                // Verificar si la respuesta contiene Cloudflare challenge
+                if (res.body.includes('Checking your browser') || 
+                    res.body.includes('cloudflare') ||
+                    res.body.includes('cf-ray') ||
+                    res.status === 503) {
+                    
+                    console.warn(`🛡️ Cloudflare detectado en intento ${attempt + 1}`);
+                    if (attempt === maxRetries - 1) {
+                        throw new Error("Cloudflare bloqueó todas las peticiones después de varios intentos");
+                    }
+                    continue;
+                }
+                
+                console.log(`✅ Petición exitosa en intento ${attempt + 1}`);
+                return res;
+                
+            } catch (error) {
+                console.error(`❌ Error en intento ${attempt + 1}:`, error.message);
+                
+                if (attempt === maxRetries - 1) {
+                    throw new Error(`Falló después de ${maxRetries} intentos: ${error.message}`);
+                }
+            }
+        }
+    }
+    
+    /**
+     * Función de delay para esperas
+     */
+    async _delay(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
     
     /**
      * Extrae metadatos básicos de la página de detalle
@@ -363,7 +430,7 @@ class DefaultExtension extends MProvider {
             return { list: [], hasNextPage: false };
         }
 
-        const res = await new Client().get(this.source.baseUrl, this.headers);
+        const res = await this._fetchWithCloudflareHandling(this.source.baseUrl);
         const doc = new Document(res.body);
         return this._parseLatestUpdatesList(doc);
     }
@@ -373,7 +440,7 @@ class DefaultExtension extends MProvider {
             ? `${this.source.baseUrl}/index.php/lista-de-novela-ligera-novela-web/?orderby=popularity`
             : `${this.source.baseUrl}/index.php/lista-de-novela-ligera-novela-web/page/${page}/?orderby=popularity`;
 
-        const res = await new Client().get(url, this.headers);
+        const res = await this._fetchWithCloudflareHandling(url);
         const doc = new Document(res.body);
         return this._parseNovelList(doc);
     }
@@ -388,13 +455,13 @@ class DefaultExtension extends MProvider {
             ? `${this.source.baseUrl}/?s=${encodeURIComponent(query)}&post_type=product`
             : `${this.source.baseUrl}/page/${page}/?s=${encodeURIComponent(query)}&post_type=product`;
 
-        const res = await new Client().get(searchUrl, this.headers);
+        const res = await this._fetchWithCloudflareHandling(searchUrl);
         const doc = new Document(res.body);
         return this._parseNovelList(doc);
     }
 
     async getDetail(url) {
-        const res = await new Client().get(url, this.headers);
+        const res = await this._fetchWithCloudflareHandling(url);
         const doc = new Document(res.body);
 
         // Usar funciones auxiliares
@@ -413,7 +480,7 @@ class DefaultExtension extends MProvider {
     }
 
     async getHtmlContent(name, url) {
-        const res = await new Client().get(url, this.headers);
+        const res = await this._fetchWithCloudflareHandling(url);
         const doc = new Document(res.body);
 
         // Usar función auxiliar
