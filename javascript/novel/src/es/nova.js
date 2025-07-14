@@ -6,7 +6,7 @@ const mangayomiSources = [{
     "iconUrl": "https://keyferv.github.io/mangayomi-extensions-personal/javascript/icon/es.nova.png",
     "typeSource": "single",
     "itemType": 2,
-    "version": "0.0.5",
+    "version": "0.0.6",
     "dateFormat": "",
     "dateFormatLocale": "",
     "pkgPath": "novel/src/es/nova.js",
@@ -21,26 +21,104 @@ class DefaultExtension extends MProvider {
         this.cloudflareRetryCount = 0;
         this.lastRequestTime = 0;
         this.sessionCookies = new Map();
+        this.userAgentRotation = 0;
+        this.preferMobile = true; // NUEVO: Preferir móviles
+        this.fingerprint = this._generateFingerprint();
     }
 
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Mobile Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-        "Accept-Language": "es-ES,es;q=0.9,en;q=0.8,en-US;q=0.7",
-        "Accept-Encoding": "gzip, deflate, br",
+        "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
+        "Accept-Encoding": "gzip, deflate, br, zstd",
         "Connection": "keep-alive",
         "Upgrade-Insecure-Requests": "1",
         "Sec-Fetch-Dest": "document",
         "Sec-Fetch-Mode": "navigate",
         "Sec-Fetch-Site": "none",
         "Sec-Fetch-User": "?1",
-        "Sec-Ch-Ua": '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
-        "Sec-Ch-Ua-Mobile": "?0",
-        "Sec-Ch-Ua-Platform": '"Windows"',
         "Cache-Control": "no-cache",
         "Pragma": "no-cache",
         "DNT": "1"
     };
+
+    // ==================== FINGERPRINT Y USER-AGENTS MÓVILES ====================
+
+    /**
+     * Genera fingerprint de navegador consistente
+     */
+    _generateFingerprint() {
+        return {
+            screen: { width: 360, height: 780, colorDepth: 24 }, // Móvil típico
+            timezone: "Europe/Madrid",
+            language: "es-ES",
+            platform: "Linux armv8l", // Android típico
+            cookieEnabled: true,
+            doNotTrack: "1",
+            hardwareConcurrency: 8,
+            deviceMemory: 4,
+            maxTouchPoints: 5 // Móvil
+        };
+    }
+
+    /**
+     * Pool de User-Agents móviles realistas y actualizados
+     */
+    _getMobileUserAgents() {
+        return [
+            // Android Chrome (más común y confiable)
+            "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Mobile Safari/537.36",
+            "Mozilla/5.0 (Linux; Android 11; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Mobile Safari/537.36",
+            "Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Mobile Safari/537.36",
+            "Mozilla/5.0 (Linux; Android 13; SM-S911B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Mobile Safari/537.36",
+            "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Mobile Safari/537.36",
+            
+            // iPhone Safari (también muy común)
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1",
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 16_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1",
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Mobile/15E148 Safari/604.1",
+            
+            // Firefox móvil (menos común pero válido)
+            "Mozilla/5.0 (Mobile; rv:121.0) Gecko/121.0 Firefox/121.0",
+            "Mozilla/5.0 (Android 12; Mobile; rv:120.0) Gecko/120.0 Firefox/120.0"
+        ];
+    }
+
+    /**
+     * Pool de User-Agents de escritorio (fallback)
+     */
+    _getDesktopUserAgents() {
+        return [
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
+        ];
+    }
+
+    /**
+     * Obtiene User-Agent rotado con preferencia móvil
+     */
+    _getRotatedUserAgent(forceMobile = null) {
+        const useMobile = forceMobile !== null ? forceMobile : 
+                         (this.preferMobile && this.userAgentRotation < 6); // Primeros 6 intentos móvil
+        
+        const userAgents = useMobile ? this._getMobileUserAgents() : this._getDesktopUserAgents();
+        
+        this.userAgentRotation = (this.userAgentRotation + 1) % userAgents.length;
+        return userAgents[this.userAgentRotation];
+    }
+
+    /**
+     * Detecta si un User-Agent es móvil
+     */
+    _isMobileUserAgent(userAgent) {
+        return userAgent.includes('Mobile') || 
+               userAgent.includes('Android') || 
+               userAgent.includes('iPhone') ||
+               userAgent.includes('iPad');
+    }
 
     _parseLatestUpdatesList(doc) {
         const list = [];
@@ -134,230 +212,265 @@ class DefaultExtension extends MProvider {
         return { list, hasNextPage };
     }
 
-    // ==================== FUNCIONES AUXILIARES ANTI-CLOUDFLARE ====================
+    // ==================== FUNCIONES AUXILIARES ANTI-CLOUDFLARE TURNSTILE ====================
     
     /**
-     * Genera headers dinámicos con variaciones realistas
+     * Headers optimizados para móviles vs escritorio con detección Turnstile
      */
-    _generateDynamicHeaders(attempt = 0, isFirstVisit = true) {
-        const baseHeaders = { ...this.headers };
+    _generateTurnstileHeaders(attempt = 0, isFirstVisit = true, forceMobile = null) {
+        const userAgent = this._getRotatedUserAgent(forceMobile);
+        const isMobile = this._isMobileUserAgent(userAgent);
+        const isFirefox = userAgent.includes('Firefox');
+        const isIPhone = userAgent.includes('iPhone');
         
-        // Variar User-Agent ocasionalmente
-        const userAgents = [
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0"
-        ];
-        
-        if (attempt > 0) {
-            baseHeaders["User-Agent"] = userAgents[attempt % userAgents.length];
-        }
-        
-        // Headers específicos según contexto
-        if (isFirstVisit) {
-            baseHeaders["Sec-Fetch-Site"] = "none";
-            baseHeaders["Sec-Fetch-Mode"] = "navigate";
-            delete baseHeaders["Referer"];
+        console.log(`📱 Usando ${isMobile ? 'MÓVIL' : 'ESCRITORIO'}: ${userAgent.substring(0, 50)}...`);
+
+        const headers = {
+            "User-Agent": userAgent,
+            "Connection": "keep-alive",
+            "Upgrade-Insecure-Requests": "1",
+            "DNT": "1"
+        };
+
+        // Accept específico por dispositivo
+        if (isIPhone) {
+            headers["Accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
+            headers["Accept-Language"] = "es-ES,es;q=0.9";
+            headers["Accept-Encoding"] = "gzip, deflate, br";
+        } else if (isMobile) {
+            headers["Accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8";
+            headers["Accept-Language"] = "es-ES,es;q=0.9,en;q=0.8";
+            headers["Accept-Encoding"] = "gzip, deflate, br, zstd";
         } else {
-            baseHeaders["Sec-Fetch-Site"] = "same-origin";
-            baseHeaders["Sec-Fetch-Mode"] = "navigate";
-            baseHeaders["Referer"] = this.source.baseUrl;
+            headers["Accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7";
+            headers["Accept-Language"] = "es-ES,es;q=0.9,en;q=0.8,en-US;q=0.7";
+            headers["Accept-Encoding"] = "gzip, deflate, br, zstd";
+        }
+
+        // Headers Sec-Fetch (solo para Chrome no-móvil y algunos móviles)
+        if (!isFirefox && !isIPhone) {
+            headers["Sec-Fetch-Dest"] = "document";
+            headers["Sec-Fetch-Mode"] = isFirstVisit ? "navigate" : "same-origin";
+            headers["Sec-Fetch-Site"] = isFirstVisit ? "none" : "same-origin";
+            headers["Sec-Fetch-User"] = "?1";
+        }
+
+        // Headers Sec-Ch-Ua (SOLO para Chrome de escritorio)
+        if (!isMobile && !isFirefox && userAgent.includes('Chrome')) {
+            if (userAgent.includes('Chrome/121')) {
+                headers["Sec-Ch-Ua"] = '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"';
+                headers["Sec-Ch-Ua-Mobile"] = "?0";
+                headers["Sec-Ch-Ua-Platform"] = '"Windows"';
+            } else if (userAgent.includes('Chrome/120')) {
+                headers["Sec-Ch-Ua"] = '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"';
+                headers["Sec-Ch-Ua-Mobile"] = "?0";
+                headers["Sec-Ch-Ua-Platform"] = userAgent.includes('Mac') ? '"macOS"' : '"Windows"';
+            }
         }
         
-        // Añadir variación temporal
-        if (attempt > 1) {
-            baseHeaders["Cache-Control"] = "max-age=0";
-            baseHeaders["If-None-Match"] = '"' + Math.random().toString(36).substr(2, 9) + '"';
+        // Headers Sec-Ch-Ua para móviles (MUY IMPORTANTE: Mobile = ?1)
+        if (isMobile && !isFirefox && !isIPhone && userAgent.includes('Chrome')) {
+            headers["Sec-Ch-Ua-Mobile"] = "?1"; // CLAVE para móviles
+            if (userAgent.includes('Chrome/138')) {
+                headers["Sec-Ch-Ua"] = '"Chromium";v="138", "Not=A?Brand";v="99", "Google Chrome";v="138"';
+                headers["Sec-Ch-Ua-Platform"] = '"Android"';
+            } else if (userAgent.includes('Chrome/137')) {
+                headers["Sec-Ch-Ua"] = '"Chromium";v="137", "Not=A?Brand";v="99", "Google Chrome";v="137"';
+                headers["Sec-Ch-Ua-Platform"] = '"Android"';
+            }
         }
-        
-        return baseHeaders;
+
+        // Estrategias por intento
+        if (attempt === 0) {
+            headers["Cache-Control"] = "no-cache";
+            headers["Pragma"] = "no-cache";
+        } else if (attempt === 1) {
+            headers["Cache-Control"] = "max-age=0";
+        } else if (attempt >= 3) {
+            // Headers ultra-mínimos para intentos tardíos
+            delete headers["Cache-Control"];
+            delete headers["Pragma"];
+            delete headers["DNT"];
+            if (headers["Sec-Ch-Ua"]) delete headers["Sec-Ch-Ua"];
+            if (headers["Sec-Ch-Ua-Platform"]) delete headers["Sec-Ch-Ua-Platform"];
+        }
+
+        // Referer solo después del primer intento
+        if (!isFirstVisit && attempt > 0) {
+            headers["Referer"] = this.source.baseUrl + "/";
+        }
+
+        return headers;
     }
-    
+
     /**
-     * Detecta varios tipos de protección Cloudflare
+     * Detecta Cloudflare Turnstile y otros sistemas modernos
      */
-    _detectCloudflareChallenge(response) {
+    _detectModernCloudflare(response) {
         const body = response.body.toLowerCase();
         const status = response.status;
         
-        // Diferentes tipos de bloqueo Cloudflare
-        const cloudflareIndicators = [
-            'checking your browser',
-            'cloudflare',
-            'cf-ray',
-            'please enable javascript',
-            'ddos protection by cloudflare',
-            'attention required',
-            'browser integrity check',
-            'security check',
-            'challenge-platform',
-            'cf-browser-verification',
+        // Indicadores específicos de Turnstile
+        const turnstileIndicators = [
+            'turnstile',
+            'cf-turnstile', 
+            'challenges.cloudflare.com',
             'cf-challenge',
-            '__cf_chl_jschl_tk__'
+            'cf-chl-bypass',
+            'attention required',
+            'checking your browser',
+            'please enable javascript',
+            'javascript and cookies',
+            'browser integrity check',
+            'ddos protection'
         ];
         
-        // Estados HTTP que indican Cloudflare
-        const cloudflareStatuses = [503, 429, 403, 521, 522, 523, 524];
-        
-        const hasCloudflareIndicator = cloudflareIndicators.some(indicator => 
-            body.includes(indicator)
+        // Headers Cloudflare
+        const cfHeaders = response.headers || {};
+        const hasCfHeaders = !!(
+            cfHeaders['cf-ray'] ||
+            cfHeaders['cf-cache-status'] ||
+            cfHeaders['cf-request-id'] ||
+            cfHeaders['server']?.toLowerCase().includes('cloudflare')
         );
         
-        const hasCloudflareStatus = cloudflareStatuses.includes(status);
+        // Estados críticos 
+        const criticalStatuses = [403, 429, 503, 520, 521, 522, 523, 524, 525, 526, 527, 530];
         
-        // Headers específicos de Cloudflare
-        const hasCloudflareHeaders = response.headers && (
-            response.headers['cf-ray'] || 
-            response.headers['cf-cache-status'] ||
-            response.headers['server']?.toLowerCase().includes('cloudflare')
-        );
+        const hasTurnstile = turnstileIndicators.some(indicator => body.includes(indicator));
+        const hasCriticalStatus = criticalStatuses.includes(status);
         
+        // Detectar tipo específico
+        let type = 'unknown';
+        let severity = 'medium';
+        
+        if (body.includes('turnstile') || body.includes('cf-turnstile')) {
+            type = 'turnstile';
+            severity = 'high';
+        } else if (body.includes('checking your browser')) {
+            type = 'browser_check';
+            severity = 'medium';
+        } else if (body.includes('javascript and cookies')) {
+            type = 'js_challenge'; 
+            severity = 'medium';
+        } else if (status === 403) {
+            type = 'forbidden';
+            severity = 'high';
+        } else if (status === 429) {
+            type = 'rate_limit';
+            severity = 'medium';
+        } else if (hasCriticalStatus) {
+            type = 'server_error';
+            severity = 'critical';
+        }
+
         return {
-            isCloudflare: hasCloudflareIndicator || hasCloudflareStatus || hasCloudflareHeaders,
-            type: hasCloudflareIndicator ? 'challenge' : hasCloudflareStatus ? 'status' : 'headers',
-            status: status
+            isBlocked: hasTurnstile || hasCriticalStatus || hasCfHeaders,
+            type: type,
+            status: status,
+            hasHeaders: hasCfHeaders,
+            severity: severity
         };
     }
-    
+
     /**
-     * Simula comportamiento humano con delays variables
+     * Delays inteligentes según tipo y dispositivo
      */
-    async _humanDelay(attempt = 0, baseDelay = 1000) {
-        const delays = [
-            baseDelay,
-            baseDelay * 2 + Math.random() * 1000,
-            baseDelay * 3 + Math.random() * 2000,
-            baseDelay * 5 + Math.random() * 3000,
-            baseDelay * 8 + Math.random() * 4000
-        ];
+    async _smartDelay(attempt, blockType = 'unknown', isMobile = true) {
+        // Móviles pueden ser más agresivos, escritorio más conservador
+        const mobileDelays = {
+            'turnstile': [1500, 3000, 5000, 8000, 12000, 18000],
+            'rate_limit': [2000, 4000, 8000, 15000, 25000, 40000],
+            'forbidden': [3000, 6000, 12000, 20000, 35000, 50000],
+            'js_challenge': [1000, 2000, 4000, 7000, 11000, 16000],
+            'unknown': [1500, 3000, 5500, 9000, 14000, 20000]
+        };
         
-        const delay = delays[Math.min(attempt, delays.length - 1)];
+        const desktopDelays = {
+            'turnstile': [2000, 5000, 8000, 12000, 18000, 25000],
+            'rate_limit': [3000, 6000, 12000, 20000, 30000, 45000],
+            'forbidden': [4000, 8000, 15000, 25000, 40000, 60000],
+            'js_challenge': [1500, 3000, 5000, 8000, 12000, 18000],
+            'unknown': [2000, 4000, 7000, 11000, 16000, 22000]
+        };
         
-        console.log(`⏳ Simulando comportamiento humano: ${Math.round(delay)}ms`);
-        await this._delay(delay);
+        const delays = isMobile ? mobileDelays : desktopDelays;
+        const delayArray = delays[blockType] || delays['unknown'];
+        const baseDelay = delayArray[Math.min(attempt, delayArray.length - 1)];
         
-        // Rate limiting adicional
+        // Variación aleatoria
+        const variation = (Math.random() - 0.5) * 0.3 * baseDelay;
+        const finalDelay = Math.max(500, baseDelay + variation);
+        
+        console.log(`⏳ Espera ${isMobile ? '📱 móvil' : '💻 escritorio'} (${blockType}): ${Math.round(finalDelay)}ms`);
+        await this._delay(finalDelay);
+        
+        // Rate limiting
         const now = Date.now();
         const timeSinceLastRequest = now - this.lastRequestTime;
-        const minInterval = 1500; // Mínimo 1.5s entre peticiones
+        const minInterval = isMobile ? (attempt > 2 ? 2000 : 1500) : (attempt > 2 ? 3000 : 2000);
         
         if (timeSinceLastRequest < minInterval) {
             const additionalWait = minInterval - timeSinceLastRequest;
-            console.log(`⏳ Rate limiting: ${additionalWait}ms adicionales`);
+            console.log(`⏳ Rate limiting: ${additionalWait}ms`);
             await this._delay(additionalWait);
         }
         
         this.lastRequestTime = Date.now();
     }
-    
+
     /**
-     * Función principal para bypass de Cloudflare con estrategias múltiples
+     * Bypass principal con estrategia móvil-primero mejorada
      */
-    async _fetchWithCloudflareHandling(url, options = {}) {
-        const maxRetries = 6; // Aumentado a 6 intentos
+    async _fetchWithAdvancedBypass(url, options = {}) {
+        const maxRetries = 10; // Aumentado para incluir más estrategias móviles
         let lastError = null;
         
         for (let attempt = 0; attempt < maxRetries; attempt++) {
             try {
-                console.log(`🌐 Bypass Cloudflare - Intento ${attempt + 1}/${maxRetries} para: ${url}`);
+                console.log(`🔄 Bypass Móvil-Primero - Intento ${attempt + 1}/${maxRetries} para: ${url}`);
                 
-                // Estrategia progresiva de delays
-                if (attempt > 0) {
-                    await this._humanDelay(attempt, 2000);
+                // Determinar estrategia por intento
+                let forceMobile = null;
+                if (attempt < 6) {
+                    forceMobile = true;  // Primeros 6 intentos: SOLO móvil
+                } else if (attempt < 8) {
+                    forceMobile = false; // Intentos 7-8: SOLO escritorio  
+                } else {
+                    forceMobile = attempt % 2 === 0; // Intentos 9-10: alternar
                 }
                 
-                // Headers dinámicos según el intento
-                const headers = this._generateDynamicHeaders(attempt, attempt === 0);
+                const headers = this._generateTurnstileHeaders(attempt, attempt === 0, forceMobile);
+                const isMobile = this._isMobileUserAgent(headers["User-Agent"]);
                 
-                // Configuración específica según el intento
-                const clientOptions = {
-                    timeout: 30000, // 30 segundos de timeout
+                if (attempt > 0) {
+                    await this._smartDelay(attempt, 'unknown', isMobile);
+                }
+                
+                const client = new Client({
+                    timeout: isMobile ? 25000 : 30000, // Móvil más rápido
                     followRedirects: true,
                     maxRedirects: 5
-                };
+                });
                 
-                const client = new Client(clientOptions);
+                const response = await client.get(url, headers);
+                const check = this._detectModernCloudflare(response);
                 
-                // Estrategia 1-2: Peticiones normales con headers variados
-                if (attempt < 2) {
-                    const res = await client.get(url, headers);
-                    const cloudflareCheck = this._detectCloudflareChallenge(res);
-                    
-                    if (!cloudflareCheck.isCloudflare) {
-                        console.log(`✅ Bypass exitoso en intento ${attempt + 1} (estrategia normal)`);
-                        this.cloudflareRetryCount = 0;
-                        return res;
-                    }
-                    
-                    console.warn(`🛡️ Cloudflare detectado (${cloudflareCheck.type}) en intento ${attempt + 1}`);
-                    lastError = new Error(`Cloudflare ${cloudflareCheck.type} - Status: ${cloudflareCheck.status}`);
-                    continue;
-                }
-                
-                // Estrategia 3-4: Simular navegador visitando la página principal primero
-                if (attempt < 4) {
-                    console.log(`🔄 Estrategia navegador: visitando página principal primero...`);
-                    
-                    try {
-                        // Visitar página principal primero
-                        const homeHeaders = this._generateDynamicHeaders(0, true);
-                        const homeRes = await client.get(this.source.baseUrl, homeHeaders);
-                        
-                        // Pequeña pausa para simular lectura
-                        await this._delay(1500 + Math.random() * 1000);
-                        
-                        // Ahora intentar la URL objetivo
-                        const targetHeaders = this._generateDynamicHeaders(attempt, false);
-                        targetHeaders["Referer"] = this.source.baseUrl;
-                        
-                        const res = await client.get(url, targetHeaders);
-                        const cloudflareCheck = this._detectCloudflareChallenge(res);
-                        
-                        if (!cloudflareCheck.isCloudflare) {
-                            console.log(`✅ Bypass exitoso en intento ${attempt + 1} (estrategia navegador)`);
-                            this.cloudflareRetryCount = 0;
-                            return res;
-                        }
-                        
-                        console.warn(`🛡️ Cloudflare persiste después de estrategia navegador`);
-                        lastError = new Error(`Cloudflare navegador - ${cloudflareCheck.type}`);
-                    } catch (homeError) {
-                        console.warn(`⚠️ Error en estrategia navegador: ${homeError.message}`);
-                        lastError = homeError;
-                    }
-                    continue;
-                }
-                
-                // Estrategia 5-6: Delays largos y headers mínimos
-                console.log(`🕰️ Estrategia espera larga: pausa extendida...`);
-                await this._humanDelay(attempt, 5000);
-                
-                const minimalHeaders = {
-                    "User-Agent": headers["User-Agent"],
-                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                    "Accept-Language": "es-ES,es;q=0.5",
-                    "Connection": "keep-alive",
-                    "Upgrade-Insecure-Requests": "1"
-                };
-                
-                const res = await client.get(url, minimalHeaders);
-                const cloudflareCheck = this._detectCloudflareChallenge(res);
-                
-                if (!cloudflareCheck.isCloudflare) {
-                    console.log(`✅ Bypass exitoso en intento ${attempt + 1} (estrategia minimalista)`);
+                if (!check.isBlocked) {
+                    console.log(`✅ Bypass exitoso - Intento ${attempt + 1} (${isMobile ? '📱 móvil' : '💻 escritorio'})`);
                     this.cloudflareRetryCount = 0;
-                    return res;
+                    return response;
                 }
                 
-                console.warn(`🛡️ Cloudflare persiste - intento ${attempt + 1} fallido`);
-                lastError = new Error(`Cloudflare persistente - ${cloudflareCheck.type}`);
+                console.warn(`🛡️ Bloqueado: ${check.type} (${check.status}) - Intento ${attempt + 1} ${isMobile ? '📱' : '💻'}`);
+                await this._smartDelay(attempt, check.type, isMobile);
+                lastError = new Error(`${check.type} ${check.status} (${isMobile ? 'móvil' : 'escritorio'})`);
                 
             } catch (error) {
-                console.error(`❌ Error en intento ${attempt + 1}:`, error.message);
+                console.error(`❌ Error intento ${attempt + 1}:`, error.message);
                 lastError = error;
                 
-                // Si es error de red, esperar más tiempo
-                if (error.message.includes('timeout') || error.message.includes('network')) {
+                if (error.message.includes('timeout')) {
                     await this._delay(3000);
                 }
             }
@@ -365,18 +478,24 @@ class DefaultExtension extends MProvider {
         
         this.cloudflareRetryCount++;
         
-        const errorMessage = `🚫 Cloudflare bypass fallido después de ${maxRetries} intentos. ` +
+        const errorMessage = `🚫 Bypass móvil-primero fallido después de ${maxRetries} intentos. ` +
                            `Error: ${lastError?.message || 'Desconocido'}. ` +
-                           `Intentos acumulados: ${this.cloudflareRetryCount}`;
-                           
+                           `Fallos consecutivos: ${this.cloudflareRetryCount}`;
+        
         console.error(errorMessage);
         
-        // Si han fallado muchos intentos consecutivos, sugerir espera manual
-        if (this.cloudflareRetryCount > 3) {
-            throw new Error(`${errorMessage}. SUGERENCIA: Espera 10-15 minutos antes de intentar nuevamente.`);
+        if (this.cloudflareRetryCount > 5) {
+            throw new Error(`${errorMessage}. CRÍTICO: Considera usar VPN o esperar 30+ minutos.`);
         }
         
         throw new Error(errorMessage);
+    }
+    
+    /**
+     * Función principal para bypass de Cloudflare con estrategias múltiples móvil-primero
+     */
+    async _fetchWithCloudflareHandling(url, options = {}) {
+        return await this._fetchWithAdvancedBypass(url, options);
     }
     
     /**
