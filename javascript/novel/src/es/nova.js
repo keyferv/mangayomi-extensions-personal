@@ -6,32 +6,40 @@ const mangayomiSources = [{
     "iconUrl": "https://keyferv.github.io/mangayomi-extensions-personal/javascript/icon/es.nova.png",
     "typeSource": "single",
     "itemType": 2,
-    "version": "0.0.4",
+    "version": "0.0.5",
     "dateFormat": "",
     "dateFormatLocale": "",
     "pkgPath": "novel/src/es/nova.js",
     "isNsfw": false,
     "hasCloudflare": true,
-    "notes": "Extensión para NovelasLigeras.net con icono personalizado y manejo avanzado de Cloudflare"
+    "notes": "Extensión para NovelasLigeras.net con sistema anti-Cloudflare ultra-avanzado, detección inteligente y estrategias múltiples de bypass"
 }];
 
 class DefaultExtension extends MProvider {
+    constructor() {
+        super();
+        this.cloudflareRetryCount = 0;
+        this.lastRequestTime = 0;
+        this.sessionCookies = new Map();
+    }
+
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-        "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
+        "Accept-Language": "es-ES,es;q=0.9,en;q=0.8,en-US;q=0.7",
         "Accept-Encoding": "gzip, deflate, br",
-        "Referer": this.source.baseUrl,
-        "Origin": this.source.baseUrl,
         "Connection": "keep-alive",
         "Upgrade-Insecure-Requests": "1",
         "Sec-Fetch-Dest": "document",
         "Sec-Fetch-Mode": "navigate",
-        "Sec-Fetch-Site": "same-origin",
-        "Sec-Ch-Ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-User": "?1",
+        "Sec-Ch-Ua": '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
         "Sec-Ch-Ua-Mobile": "?0",
         "Sec-Ch-Ua-Platform": '"Windows"',
-        "Cache-Control": "max-age=0"
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
+        "DNT": "1"
     };
 
     _parseLatestUpdatesList(doc) {
@@ -126,59 +134,249 @@ class DefaultExtension extends MProvider {
         return { list, hasNextPage };
     }
 
-    // ==================== FUNCIONES AUXILIARES ====================
+    // ==================== FUNCIONES AUXILIARES ANTI-CLOUDFLARE ====================
     
     /**
-     * Función para manejar Cloudflare con reintentos y delays
+     * Genera headers dinámicos con variaciones realistas
+     */
+    _generateDynamicHeaders(attempt = 0, isFirstVisit = true) {
+        const baseHeaders = { ...this.headers };
+        
+        // Variar User-Agent ocasionalmente
+        const userAgents = [
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0"
+        ];
+        
+        if (attempt > 0) {
+            baseHeaders["User-Agent"] = userAgents[attempt % userAgents.length];
+        }
+        
+        // Headers específicos según contexto
+        if (isFirstVisit) {
+            baseHeaders["Sec-Fetch-Site"] = "none";
+            baseHeaders["Sec-Fetch-Mode"] = "navigate";
+            delete baseHeaders["Referer"];
+        } else {
+            baseHeaders["Sec-Fetch-Site"] = "same-origin";
+            baseHeaders["Sec-Fetch-Mode"] = "navigate";
+            baseHeaders["Referer"] = this.source.baseUrl;
+        }
+        
+        // Añadir variación temporal
+        if (attempt > 1) {
+            baseHeaders["Cache-Control"] = "max-age=0";
+            baseHeaders["If-None-Match"] = '"' + Math.random().toString(36).substr(2, 9) + '"';
+        }
+        
+        return baseHeaders;
+    }
+    
+    /**
+     * Detecta varios tipos de protección Cloudflare
+     */
+    _detectCloudflareChallenge(response) {
+        const body = response.body.toLowerCase();
+        const status = response.status;
+        
+        // Diferentes tipos de bloqueo Cloudflare
+        const cloudflareIndicators = [
+            'checking your browser',
+            'cloudflare',
+            'cf-ray',
+            'please enable javascript',
+            'ddos protection by cloudflare',
+            'attention required',
+            'browser integrity check',
+            'security check',
+            'challenge-platform',
+            'cf-browser-verification',
+            'cf-challenge',
+            '__cf_chl_jschl_tk__'
+        ];
+        
+        // Estados HTTP que indican Cloudflare
+        const cloudflareStatuses = [503, 429, 403, 521, 522, 523, 524];
+        
+        const hasCloudflareIndicator = cloudflareIndicators.some(indicator => 
+            body.includes(indicator)
+        );
+        
+        const hasCloudflareStatus = cloudflareStatuses.includes(status);
+        
+        // Headers específicos de Cloudflare
+        const hasCloudflareHeaders = response.headers && (
+            response.headers['cf-ray'] || 
+            response.headers['cf-cache-status'] ||
+            response.headers['server']?.toLowerCase().includes('cloudflare')
+        );
+        
+        return {
+            isCloudflare: hasCloudflareIndicator || hasCloudflareStatus || hasCloudflareHeaders,
+            type: hasCloudflareIndicator ? 'challenge' : hasCloudflareStatus ? 'status' : 'headers',
+            status: status
+        };
+    }
+    
+    /**
+     * Simula comportamiento humano con delays variables
+     */
+    async _humanDelay(attempt = 0, baseDelay = 1000) {
+        const delays = [
+            baseDelay,
+            baseDelay * 2 + Math.random() * 1000,
+            baseDelay * 3 + Math.random() * 2000,
+            baseDelay * 5 + Math.random() * 3000,
+            baseDelay * 8 + Math.random() * 4000
+        ];
+        
+        const delay = delays[Math.min(attempt, delays.length - 1)];
+        
+        console.log(`⏳ Simulando comportamiento humano: ${Math.round(delay)}ms`);
+        await this._delay(delay);
+        
+        // Rate limiting adicional
+        const now = Date.now();
+        const timeSinceLastRequest = now - this.lastRequestTime;
+        const minInterval = 1500; // Mínimo 1.5s entre peticiones
+        
+        if (timeSinceLastRequest < minInterval) {
+            const additionalWait = minInterval - timeSinceLastRequest;
+            console.log(`⏳ Rate limiting: ${additionalWait}ms adicionales`);
+            await this._delay(additionalWait);
+        }
+        
+        this.lastRequestTime = Date.now();
+    }
+    
+    /**
+     * Función principal para bypass de Cloudflare con estrategias múltiples
      */
     async _fetchWithCloudflareHandling(url, options = {}) {
-        const maxRetries = 3;
-        const delays = [2000, 5000, 10000]; // 2s, 5s, 10s
+        const maxRetries = 6; // Aumentado a 6 intentos
+        let lastError = null;
         
         for (let attempt = 0; attempt < maxRetries; attempt++) {
             try {
-                console.log(`🌐 Intento ${attempt + 1}/${maxRetries} para: ${url}`);
+                console.log(`🌐 Bypass Cloudflare - Intento ${attempt + 1}/${maxRetries} para: ${url}`);
                 
-                // Añadir delay progresivo para evitar rate limiting
+                // Estrategia progresiva de delays
                 if (attempt > 0) {
-                    console.log(`⏳ Esperando ${delays[attempt - 1]}ms antes del siguiente intento...`);
-                    await this._delay(delays[attempt - 1]);
+                    await this._humanDelay(attempt, 2000);
                 }
                 
-                // Headers más completos para simular navegador real
-                const enhancedHeaders = {
-                    ...this.headers,
-                    "Cache-Control": attempt === 0 ? "no-cache" : "max-age=300",
-                    "Pragma": attempt === 0 ? "no-cache" : undefined
+                // Headers dinámicos según el intento
+                const headers = this._generateDynamicHeaders(attempt, attempt === 0);
+                
+                // Configuración específica según el intento
+                const clientOptions = {
+                    timeout: 30000, // 30 segundos de timeout
+                    followRedirects: true,
+                    maxRedirects: 5
                 };
                 
-                const client = new Client();
-                const res = await client.get(url, enhancedHeaders);
+                const client = new Client(clientOptions);
                 
-                // Verificar si la respuesta contiene Cloudflare challenge
-                if (res.body.includes('Checking your browser') || 
-                    res.body.includes('cloudflare') ||
-                    res.body.includes('cf-ray') ||
-                    res.status === 503) {
+                // Estrategia 1-2: Peticiones normales con headers variados
+                if (attempt < 2) {
+                    const res = await client.get(url, headers);
+                    const cloudflareCheck = this._detectCloudflareChallenge(res);
                     
-                    console.warn(`🛡️ Cloudflare detectado en intento ${attempt + 1}`);
-                    if (attempt === maxRetries - 1) {
-                        throw new Error("Cloudflare bloqueó todas las peticiones después de varios intentos");
+                    if (!cloudflareCheck.isCloudflare) {
+                        console.log(`✅ Bypass exitoso en intento ${attempt + 1} (estrategia normal)`);
+                        this.cloudflareRetryCount = 0;
+                        return res;
+                    }
+                    
+                    console.warn(`🛡️ Cloudflare detectado (${cloudflareCheck.type}) en intento ${attempt + 1}`);
+                    lastError = new Error(`Cloudflare ${cloudflareCheck.type} - Status: ${cloudflareCheck.status}`);
+                    continue;
+                }
+                
+                // Estrategia 3-4: Simular navegador visitando la página principal primero
+                if (attempt < 4) {
+                    console.log(`🔄 Estrategia navegador: visitando página principal primero...`);
+                    
+                    try {
+                        // Visitar página principal primero
+                        const homeHeaders = this._generateDynamicHeaders(0, true);
+                        const homeRes = await client.get(this.source.baseUrl, homeHeaders);
+                        
+                        // Pequeña pausa para simular lectura
+                        await this._delay(1500 + Math.random() * 1000);
+                        
+                        // Ahora intentar la URL objetivo
+                        const targetHeaders = this._generateDynamicHeaders(attempt, false);
+                        targetHeaders["Referer"] = this.source.baseUrl;
+                        
+                        const res = await client.get(url, targetHeaders);
+                        const cloudflareCheck = this._detectCloudflareChallenge(res);
+                        
+                        if (!cloudflareCheck.isCloudflare) {
+                            console.log(`✅ Bypass exitoso en intento ${attempt + 1} (estrategia navegador)`);
+                            this.cloudflareRetryCount = 0;
+                            return res;
+                        }
+                        
+                        console.warn(`🛡️ Cloudflare persiste después de estrategia navegador`);
+                        lastError = new Error(`Cloudflare navegador - ${cloudflareCheck.type}`);
+                    } catch (homeError) {
+                        console.warn(`⚠️ Error en estrategia navegador: ${homeError.message}`);
+                        lastError = homeError;
                     }
                     continue;
                 }
                 
-                console.log(`✅ Petición exitosa en intento ${attempt + 1}`);
-                return res;
+                // Estrategia 5-6: Delays largos y headers mínimos
+                console.log(`🕰️ Estrategia espera larga: pausa extendida...`);
+                await this._humanDelay(attempt, 5000);
+                
+                const minimalHeaders = {
+                    "User-Agent": headers["User-Agent"],
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    "Accept-Language": "es-ES,es;q=0.5",
+                    "Connection": "keep-alive",
+                    "Upgrade-Insecure-Requests": "1"
+                };
+                
+                const res = await client.get(url, minimalHeaders);
+                const cloudflareCheck = this._detectCloudflareChallenge(res);
+                
+                if (!cloudflareCheck.isCloudflare) {
+                    console.log(`✅ Bypass exitoso en intento ${attempt + 1} (estrategia minimalista)`);
+                    this.cloudflareRetryCount = 0;
+                    return res;
+                }
+                
+                console.warn(`🛡️ Cloudflare persiste - intento ${attempt + 1} fallido`);
+                lastError = new Error(`Cloudflare persistente - ${cloudflareCheck.type}`);
                 
             } catch (error) {
                 console.error(`❌ Error en intento ${attempt + 1}:`, error.message);
+                lastError = error;
                 
-                if (attempt === maxRetries - 1) {
-                    throw new Error(`Falló después de ${maxRetries} intentos: ${error.message}`);
+                // Si es error de red, esperar más tiempo
+                if (error.message.includes('timeout') || error.message.includes('network')) {
+                    await this._delay(3000);
                 }
             }
         }
+        
+        this.cloudflareRetryCount++;
+        
+        const errorMessage = `🚫 Cloudflare bypass fallido después de ${maxRetries} intentos. ` +
+                           `Error: ${lastError?.message || 'Desconocido'}. ` +
+                           `Intentos acumulados: ${this.cloudflareRetryCount}`;
+                           
+        console.error(errorMessage);
+        
+        // Si han fallado muchos intentos consecutivos, sugerir espera manual
+        if (this.cloudflareRetryCount > 3) {
+            throw new Error(`${errorMessage}. SUGERENCIA: Espera 10-15 minutos antes de intentar nuevamente.`);
+        }
+        
+        throw new Error(errorMessage);
     }
     
     /**
