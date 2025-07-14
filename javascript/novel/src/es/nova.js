@@ -6,13 +6,13 @@ const mangayomiSources = [{
     "iconUrl": "https://keyferv.github.io/mangayomi-extensions-personal/javascript/icon/es.nova.png",
     "typeSource": "single",
     "itemType": 2,
-    "version": "0.0.6",
+    "version": "0.0.7",
     "dateFormat": "",
     "dateFormatLocale": "",
     "pkgPath": "novel/src/es/nova.js",
     "isNsfw": false,
     "hasCloudflare": true,
-    "notes": "Extensión para NovelasLigeras.net con sistema anti-Cloudflare ultra-avanzado, detección inteligente y estrategias múltiples de bypass"
+    "notes": "Extensión para NovelasLigeras.net con técnicas Patchright-inspired: anti-detección avanzada, fingerprinting realista, timing humano y estrategias progresivas contra Cloudflare Turnstile"
 }];
 
 class DefaultExtension extends MProvider {
@@ -22,8 +22,10 @@ class DefaultExtension extends MProvider {
         this.lastRequestTime = 0;
         this.sessionCookies = new Map();
         this.userAgentRotation = 0;
-        this.preferMobile = true; // NUEVO: Preferir móviles
+        this.preferMobile = true;
         this.fingerprint = this._generateFingerprint();
+        this.sessionId = this._generateSessionId();
+        this.browserEntropy = this._generateBrowserEntropy();
     }
 
     headers = {
@@ -215,39 +217,29 @@ class DefaultExtension extends MProvider {
     // ==================== FUNCIONES AUXILIARES ANTI-CLOUDFLARE TURNSTILE ====================
     
     /**
-     * Headers optimizados para móviles vs escritorio con detección Turnstile
+     * Headers optimizados con anti-detección Patchright-style
      */
     _generateTurnstileHeaders(attempt = 0, isFirstVisit = true, forceMobile = null) {
         const userAgent = this._getRotatedUserAgent(forceMobile);
         const isMobile = this._isMobileUserAgent(userAgent);
         const isFirefox = userAgent.includes('Firefox');
         const isIPhone = userAgent.includes('iPhone');
+        const isChrome = userAgent.includes('Chrome');
         
         console.log(`📱 Usando ${isMobile ? 'MÓVIL' : 'ESCRITORIO'}: ${userAgent.substring(0, 50)}...`);
 
-        const headers = {
-            "User-Agent": userAgent,
-            "Connection": "keep-alive",
-            "Upgrade-Insecure-Requests": "1",
-            "DNT": "1"
-        };
+        // Base headers con orden específico (crítico para Patchright-style)
+        const headers = {};
+        
+        // Orden estricto para evitar detección
+        headers["User-Agent"] = userAgent;
+        headers["Accept"] = this._getAcceptHeader(isMobile, isIPhone, isFirefox);
+        headers["Accept-Language"] = this._getAcceptLanguageHeader(isMobile, isIPhone);
+        headers["Accept-Encoding"] = this._getAcceptEncodingHeader(isMobile, isIPhone);
+        headers["Connection"] = "keep-alive";
+        headers["Upgrade-Insecure-Requests"] = "1";
 
-        // Accept específico por dispositivo
-        if (isIPhone) {
-            headers["Accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
-            headers["Accept-Language"] = "es-ES,es;q=0.9";
-            headers["Accept-Encoding"] = "gzip, deflate, br";
-        } else if (isMobile) {
-            headers["Accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8";
-            headers["Accept-Language"] = "es-ES,es;q=0.9,en;q=0.8";
-            headers["Accept-Encoding"] = "gzip, deflate, br, zstd";
-        } else {
-            headers["Accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7";
-            headers["Accept-Language"] = "es-ES,es;q=0.9,en;q=0.8,en-US;q=0.7";
-            headers["Accept-Encoding"] = "gzip, deflate, br, zstd";
-        }
-
-        // Headers Sec-Fetch (solo para Chrome no-móvil y algunos móviles)
+        // Headers Sec-Fetch (orden específico)
         if (!isFirefox && !isIPhone) {
             headers["Sec-Fetch-Dest"] = "document";
             headers["Sec-Fetch-Mode"] = isFirstVisit ? "navigate" : "same-origin";
@@ -255,52 +247,116 @@ class DefaultExtension extends MProvider {
             headers["Sec-Fetch-User"] = "?1";
         }
 
-        // Headers Sec-Ch-Ua (SOLO para Chrome de escritorio)
-        if (!isMobile && !isFirefox && userAgent.includes('Chrome')) {
-            if (userAgent.includes('Chrome/121')) {
-                headers["Sec-Ch-Ua"] = '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"';
-                headers["Sec-Ch-Ua-Mobile"] = "?0";
-                headers["Sec-Ch-Ua-Platform"] = '"Windows"';
-            } else if (userAgent.includes('Chrome/120')) {
-                headers["Sec-Ch-Ua"] = '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"';
-                headers["Sec-Ch-Ua-Mobile"] = "?0";
-                headers["Sec-Ch-Ua-Platform"] = userAgent.includes('Mac') ? '"macOS"' : '"Windows"';
-            }
-        }
-        
-        // Headers Sec-Ch-Ua para móviles (MUY IMPORTANTE: Mobile = ?1)
-        if (isMobile && !isFirefox && !isIPhone && userAgent.includes('Chrome')) {
-            headers["Sec-Ch-Ua-Mobile"] = "?1"; // CLAVE para móviles
-            if (userAgent.includes('Chrome/138')) {
-                headers["Sec-Ch-Ua"] = '"Chromium";v="138", "Not=A?Brand";v="99", "Google Chrome";v="138"';
-                headers["Sec-Ch-Ua-Platform"] = '"Android"';
-            } else if (userAgent.includes('Chrome/137')) {
-                headers["Sec-Ch-Ua"] = '"Chromium";v="137", "Not=A?Brand";v="99", "Google Chrome";v="137"';
-                headers["Sec-Ch-Ua-Platform"] = '"Android"';
-            }
+        // Headers Client Hints (Chrome específico)
+        if (isChrome && !isFirefox) {
+            const clientHints = this._generateClientHints(userAgent, isMobile);
+            Object.assign(headers, clientHints);
         }
 
-        // Estrategias por intento
+        // Cache control estratégico
         if (attempt === 0) {
             headers["Cache-Control"] = "no-cache";
             headers["Pragma"] = "no-cache";
         } else if (attempt === 1) {
             headers["Cache-Control"] = "max-age=0";
         } else if (attempt >= 3) {
-            // Headers ultra-mínimos para intentos tardíos
+            // Headers mínimos para intentos avanzados
             delete headers["Cache-Control"];
             delete headers["Pragma"];
-            delete headers["DNT"];
-            if (headers["Sec-Ch-Ua"]) delete headers["Sec-Ch-Ua"];
-            if (headers["Sec-Ch-Ua-Platform"]) delete headers["Sec-Ch-Ua-Platform"];
         }
 
-        // Referer solo después del primer intento
+        // DNT (Do Not Track) - realista
+        if (Math.random() > 0.3) { // 70% de navegadores tienen DNT
+            headers["DNT"] = "1";
+        }
+
+        // Referer con timing realista
         if (!isFirstVisit && attempt > 0) {
             headers["Referer"] = this.source.baseUrl + "/";
         }
 
+        // Headers experimentales (Patchright-style)
+        if (attempt >= 2 && isMobile) {
+            headers["Sec-CH-UA-Arch"] = '"arm"';
+            headers["Sec-CH-UA-Bitness"] = '"64"';
+        }
+
         return headers;
+    }
+
+    /**
+     * Accept header específico por dispositivo y navegador
+     */
+    _getAcceptHeader(isMobile, isIPhone, isFirefox) {
+        if (isIPhone) {
+            return "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
+        } else if (isFirefox) {
+            return "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8";
+        } else if (isMobile) {
+            return "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8";
+        } else {
+            return "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7";
+        }
+    }
+
+    /**
+     * Accept-Language con variaciones regionales realistas
+     */
+    _getAcceptLanguageHeader(isMobile, isIPhone) {
+        const variants = [
+            "es-ES,es;q=0.9,en;q=0.8",
+            "es-ES,es;q=0.9,en;q=0.8,en-US;q=0.7",
+            "es,es-ES;q=0.9,en;q=0.8",
+            "es-ES,es;q=0.8,en;q=0.7"
+        ];
+        
+        if (isIPhone) {
+            return "es-ES,es;q=0.9";
+        }
+        
+        return variants[Math.floor(Math.random() * variants.length)];
+    }
+
+    /**
+     * Accept-Encoding con soporte moderno
+     */
+    _getAcceptEncodingHeader(isMobile, isIPhone) {
+        if (isIPhone) {
+            return "gzip, deflate, br";
+        } else if (isMobile) {
+            return Math.random() > 0.5 ? "gzip, deflate, br, zstd" : "gzip, deflate, br";
+        } else {
+            return "gzip, deflate, br, zstd";
+        }
+    }
+
+    /**
+     * Client Hints modernos y realistas
+     */
+    _generateClientHints(userAgent, isMobile) {
+        const hints = {};
+        
+        if (isMobile) {
+            hints["Sec-Ch-Ua-Mobile"] = "?1";
+            hints["Sec-Ch-Ua-Platform"] = '"Android"';
+            
+            if (userAgent.includes('Chrome/138')) {
+                hints["Sec-Ch-Ua"] = '"Chromium";v="138", "Not=A?Brand";v="99", "Google Chrome";v="138"';
+                hints["Sec-Ch-Ua-Full-Version-List"] = '"Chromium";v="138.0.7000.0", "Not=A?Brand";v="99.0.0.0", "Google Chrome";v="138.0.7000.0"';
+            } else if (userAgent.includes('Chrome/137')) {
+                hints["Sec-Ch-Ua"] = '"Chromium";v="137", "Not=A?Brand";v="99", "Google Chrome";v="137"';
+            }
+        } else {
+            hints["Sec-Ch-Ua-Mobile"] = "?0";
+            hints["Sec-Ch-Ua-Platform"] = userAgent.includes('Mac') ? '"macOS"' : '"Windows"';
+            
+            if (userAgent.includes('Chrome/121')) {
+                hints["Sec-Ch-Ua"] = '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"';
+                hints["Sec-Ch-Ua-Full-Version-List"] = '"Not A(Brand";v="99.0.0.0", "Google Chrome";v="121.0.6167.160", "Chromium";v="121.0.6167.160"';
+            }
+        }
+
+        return hints;
     }
 
     /**
@@ -420,75 +476,152 @@ class DefaultExtension extends MProvider {
     }
 
     /**
-     * Bypass principal con estrategia móvil-primero mejorada
+     * Bypass principal con técnicas Patchright-inspired
      */
     async _fetchWithAdvancedBypass(url, options = {}) {
-        const maxRetries = 10; // Aumentado para incluir más estrategias móviles
+        const maxRetries = 12; // Aumentado para más estrategias
         let lastError = null;
         
         for (let attempt = 0; attempt < maxRetries; attempt++) {
             try {
-                console.log(`🔄 Bypass Móvil-Primero - Intento ${attempt + 1}/${maxRetries} para: ${url}`);
+                console.log(`🔄 Bypass Patchright-Style - Intento ${attempt + 1}/${maxRetries} para: ${url}`);
                 
-                // Determinar estrategia por intento
+                // Estrategia progresiva más sofisticada
                 let forceMobile = null;
-                if (attempt < 6) {
-                    forceMobile = true;  // Primeros 6 intentos: SOLO móvil
-                } else if (attempt < 8) {
-                    forceMobile = false; // Intentos 7-8: SOLO escritorio  
+                let strategy = 'normal';
+                
+                if (attempt < 4) {
+                    forceMobile = true;
+                    strategy = 'mobile_aggressive';
+                } else if (attempt < 7) {
+                    forceMobile = true;
+                    strategy = 'mobile_stealth';
+                } else if (attempt < 10) {
+                    forceMobile = false;
+                    strategy = 'desktop_fallback';
                 } else {
-                    forceMobile = attempt % 2 === 0; // Intentos 9-10: alternar
+                    forceMobile = attempt % 2 === 0;
+                    strategy = 'desperate';
                 }
                 
                 const headers = this._generateTurnstileHeaders(attempt, attempt === 0, forceMobile);
                 const isMobile = this._isMobileUserAgent(headers["User-Agent"]);
                 
+                // Timing humano realista (Patchright-style)
                 if (attempt > 0) {
+                    const timing = this._calculateNetworkTiming(isMobile);
                     await this._smartDelay(attempt, 'unknown', isMobile);
+                    
+                    // Simular tiempo de pensamiento humano
+                    if (attempt >= 3) {
+                        const thinkTime = 500 + Math.random() * 2000;
+                        console.log(`🤔 Tiempo de pensamiento humano: ${Math.round(thinkTime)}ms`);
+                        await this._delay(thinkTime);
+                    }
                 }
                 
-                const client = new Client({
-                    timeout: isMobile ? 25000 : 30000, // Móvil más rápido
+                // Configuración de cliente con anti-detección
+                const clientConfig = {
+                    timeout: this._calculateTimeout(isMobile, strategy),
                     followRedirects: true,
-                    maxRedirects: 5
-                });
+                    maxRedirects: strategy === 'desperate' ? 8 : 5
+                };
+                
+                // Headers adicionales para estrategias específicas
+                if (strategy === 'mobile_stealth') {
+                    headers["Sec-CH-Prefers-Color-Scheme"] = "light";
+                    headers["Sec-CH-Prefers-Reduced-Motion"] = "no-preference";
+                } else if (strategy === 'desktop_fallback') {
+                    headers["Sec-CH-UA-Arch"] = '"x86"';
+                    headers["Sec-CH-UA-Bitness"] = '"64"';
+                }
+                
+                const client = new Client(clientConfig);
+                
+                // Pre-request: simular navegación humana
+                if (attempt >= 5 && Math.random() > 0.5) {
+                    console.log("🎭 Simulando navegación previa...");
+                    try {
+                        await client.get(this.source.baseUrl, {
+                            "User-Agent": headers["User-Agent"],
+                            "Accept": "text/html",
+                            "Connection": "keep-alive"
+                        });
+                        await this._delay(800 + Math.random() * 1200);
+                    } catch (e) {
+                        console.log("⚠️ Pre-navegación falló, continuando...");
+                    }
+                }
                 
                 const response = await client.get(url, headers);
                 const check = this._detectModernCloudflare(response);
                 
                 if (!check.isBlocked) {
-                    console.log(`✅ Bypass exitoso - Intento ${attempt + 1} (${isMobile ? '📱 móvil' : '💻 escritorio'})`);
+                    console.log(`✅ Bypass exitoso - Intento ${attempt + 1} (${strategy}, ${isMobile ? '📱 móvil' : '💻 escritorio'})`);
                     this.cloudflareRetryCount = 0;
+                    
+                    // Simular tiempo de lectura humano
+                    if (response.body.length > 10000) {
+                        const readTime = 300 + Math.random() * 500;
+                        await this._delay(readTime);
+                    }
+                    
                     return response;
                 }
                 
-                console.warn(`🛡️ Bloqueado: ${check.type} (${check.status}) - Intento ${attempt + 1} ${isMobile ? '📱' : '💻'}`);
+                console.warn(`🛡️ Bloqueado: ${check.type} (${check.status}) - ${strategy} ${isMobile ? '📱' : '💻'}`);
                 await this._smartDelay(attempt, check.type, isMobile);
-                lastError = new Error(`${check.type} ${check.status} (${isMobile ? 'móvil' : 'escritorio'})`);
+                lastError = new Error(`${check.type} ${check.status} (${strategy})`);
+                
+                // Estrategia de reset para intentos tardíos
+                if (attempt >= 8) {
+                    console.log("🔄 Reset de estado para intentos finales...");
+                    this.userAgentRotation = 0;
+                    this.sessionCookies.clear();
+                }
                 
             } catch (error) {
                 console.error(`❌ Error intento ${attempt + 1}:`, error.message);
                 lastError = error;
                 
+                // Manejo específico de errores
                 if (error.message.includes('timeout')) {
+                    await this._delay(2000 + attempt * 1000);
+                } else if (error.message.includes('network')) {
                     await this._delay(3000);
+                } else if (error.message.includes('SSL') || error.message.includes('TLS')) {
+                    await this._delay(5000);
                 }
             }
         }
         
         this.cloudflareRetryCount++;
         
-        const errorMessage = `🚫 Bypass móvil-primero fallido después de ${maxRetries} intentos. ` +
+        const errorMessage = `🚫 Bypass Patchright-style fallido después de ${maxRetries} intentos. ` +
                            `Error: ${lastError?.message || 'Desconocido'}. ` +
                            `Fallos consecutivos: ${this.cloudflareRetryCount}`;
         
         console.error(errorMessage);
         
         if (this.cloudflareRetryCount > 5) {
-            throw new Error(`${errorMessage}. CRÍTICO: Considera usar VPN o esperar 30+ minutos.`);
+            throw new Error(`${errorMessage}. CRÍTICO: IP posiblemente bloqueada. Usar VPN o esperar 1+ hora.`);
         }
         
         throw new Error(errorMessage);
+    }
+
+    /**
+     * Calcula timeout dinámico según estrategia
+     */
+    _calculateTimeout(isMobile, strategy) {
+        const timeouts = {
+            'mobile_aggressive': 20000,
+            'mobile_stealth': 35000,
+            'desktop_fallback': 45000,
+            'desperate': 60000
+        };
+        
+        return timeouts[strategy] || (isMobile ? 25000 : 30000);
     }
     
     /**
@@ -853,5 +986,171 @@ class DefaultExtension extends MProvider {
 
     getHeaders(url) {
         return this.headers;
+    }
+
+    // ==================== PATCHRIGHT-INSPIRED ANTI-DETECTION ====================
+
+    /**
+     * Genera ID de sesión único para simular sesión persistente
+     */
+    _generateSessionId() {
+        const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+        let result = '';
+        for (let i = 0; i < 16; i++) {
+            result += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+        return result;
+    }
+
+    /**
+     * Genera entropía de navegador realista (inspirado en Patchright)
+     */
+    _generateBrowserEntropy() {
+        return {
+            canvas: this._generateCanvasFingerprint(),
+            webgl: this._generateWebGLFingerprint(),
+            audio: this._generateAudioFingerprint(),
+            fonts: this._generateFontList(),
+            plugins: this._generatePluginList(),
+            permissions: this._generatePermissions()
+        };
+    }
+
+    /**
+     * Canvas fingerprint simulado
+     */
+    _generateCanvasFingerprint() {
+        // Simular hash de canvas típico de Android Chrome
+        const androidHashes = [
+            "a1b2c3d4e5f6789012345678901234567890abcd",
+            "b2c3d4e5f6789012345678901234567890abcdef1",
+            "c3d4e5f6789012345678901234567890abcdef12",
+            "d4e5f6789012345678901234567890abcdef123",
+            "e5f6789012345678901234567890abcdef1234"
+        ];
+        return androidHashes[Math.floor(Math.random() * androidHashes.length)];
+    }
+
+    /**
+     * WebGL fingerprint simulado
+     */
+    _generateWebGLFingerprint() {
+        return {
+            vendor: "ARM",
+            renderer: "Mali-G76 MP12",
+            version: "WebGL 2.0",
+            extensions: [
+                "WEBGL_compressed_texture_s3tc",
+                "WEBGL_compressed_texture_etc",
+                "OES_texture_float",
+                "OES_standard_derivatives"
+            ]
+        };
+    }
+
+    /**
+     * Audio fingerprint simulado
+     */
+    _generateAudioFingerprint() {
+        return Math.random().toString(36).substring(2, 10);
+    }
+
+    /**
+     * Lista de fuentes típicas de Android
+     */
+    _generateFontList() {
+        return [
+            "Roboto", "Noto Sans", "Droid Sans", "Ubuntu",
+            "Arial", "Helvetica", "sans-serif", "monospace"
+        ];
+    }
+
+    /**
+     * Lista de plugins típicos de móvil
+     */
+    _generatePluginList() {
+        return [
+            "Chrome PDF Plugin",
+            "Chrome PDF Viewer",
+            "Native Client"
+        ];
+    }
+
+    /**
+     * Permisos típicos de navegador móvil
+     */
+    _generatePermissions() {
+        return {
+            camera: "prompt",
+            microphone: "prompt",
+            notifications: "default",
+            geolocation: "prompt"
+        };
+    }
+
+    /**
+     * TLS fingerprint avanzado (inspirado en Patchright)
+     */
+    _generateTLSFingerprint() {
+        return {
+            version: "TLS 1.3",
+            cipherSuites: [
+                "TLS_AES_128_GCM_SHA256",
+                "TLS_AES_256_GCM_SHA384",
+                "TLS_CHACHA20_POLY1305_SHA256"
+            ],
+            extensions: [
+                "server_name",
+                "supported_groups", 
+                "signature_algorithms",
+                "renegotiation_info"
+            ]
+        };
+    }
+
+    /**
+     * Headers HTTP/2 con priorización realista
+     */
+    _generateHTTP2Headers(userAgent, isMobile) {
+        const headers = {};
+        
+        // Orden específico de headers (crítico para anti-detección)
+        const headerOrder = isMobile ? [
+            ":method", ":authority", ":scheme", ":path",
+            "cache-control", "sec-ch-ua", "sec-ch-ua-mobile", 
+            "sec-ch-ua-platform", "upgrade-insecure-requests",
+            "user-agent", "accept", "sec-fetch-site", "sec-fetch-mode",
+            "sec-fetch-user", "sec-fetch-dest", "accept-encoding", 
+            "accept-language"
+        ] : [
+            ":method", ":authority", ":scheme", ":path",
+            "cache-control", "sec-ch-ua", "sec-ch-ua-mobile",
+            "sec-ch-ua-platform", "upgrade-insecure-requests", 
+            "user-agent", "accept", "sec-fetch-site", "sec-fetch-mode",
+            "sec-fetch-user", "sec-fetch-dest", "accept-encoding",
+            "accept-language"
+        ];
+
+        return { headers, order: headerOrder };
+    }
+
+    /**
+     * Timing realista de red (simula latencia humana)
+     */
+    _calculateNetworkTiming(isMobile = true) {
+        const base = isMobile ? 
+            { dns: 12, connect: 45, tls: 67, ttfb: 156, total: 234 } :
+            { dns: 8, connect: 32, tls: 54, ttfb: 123, total: 189 };
+        
+        // Agregar variación realista (+/- 15%)
+        const variation = () => 0.85 + (Math.random() * 0.3);
+        
+        return {
+            dnsLookup: Math.round(base.dns * variation()),
+            tcpConnect: Math.round(base.connect * variation()),
+            tlsHandshake: Math.round(base.tls * variation()),
+            timeToFirstByte: Math.round(base.ttfb * variation()),
+            totalTime: Math.round(base.total * variation())
+        };
     }
 }
