@@ -1,1 +1,46 @@
-[{"name":"Devil Novels","id":1234567890,"baseUrl":"https://devilnovels.com","lang":"es","typeSource":"single","iconUrl":"https://keyferv.github.io/mangayomi-extensions-personal/javascript/icon/es.devilnovels.png","dateFormat":"","dateFormatLocale":"","isNsfw":false,"hasCloudflare":false,"sourceCodeUrl":"https://keyferv.github.io/mangayomi-extensions-personal/javascript/novel/src/es/devilnovels.js","apiUrl":"","version":"0.0.1","isManga":false,"itemType":2,"isFullData":false,"appMinVerReq":"0.5.0","additionalParams":"","sourceCodeLanguage":1,"notes":"Extensión para leer novelas en español desde Devil Novels"}]
+[
+  {
+    "name": "Devil Novels",
+    "id": 1234567890,
+    "baseUrl": "https://devilnovels.com",
+    "lang": "es",
+    "typeSource": "single",
+    "iconUrl": "https://keyferv.github.io/mangayomi-extensions-personal/javascript/icon/es.devilnovels.png",
+    "dateFormat": "",
+    "dateFormatLocale": "",
+    "isNsfw": false,
+    "hasCloudflare": false,
+    "sourceCodeUrl": "https://keyferv.github.io/mangayomi-extensions-personal/javascript/novel/src/es/devilnovels.js",
+    "apiUrl": "",
+    "version": "0.0.1",
+    "isManga": false,
+    "itemType": 2,
+    "isFullData": false,
+    "appMinVerReq": "0.5.0",
+    "additionalParams": "",
+    "sourceCodeLanguage": 1,
+    "notes": "Extensión para leer novelas en español desde Devil Novels"
+  },
+  {
+    "name": "Novelas Ligeras",
+    "id": 1234567891,
+    "baseUrl": "https://novelasligeras.net",
+    "lang": "es",
+    "typeSource": "single",
+    "iconUrl": "https://keyferv.github.io/mangayomi-extensions-personal/javascript/icon/es.nova.png",
+    "dateFormat": "",
+    "dateFormatLocale": "",
+    "isNsfw": false,
+    "hasCloudflare": true,
+    "sourceCodeUrl": "https://keyferv.github.io/mangayomi-extensions-personal/javascript/novel/src/es/nova.js",
+    "apiUrl": "",
+    "version": "0.0.2",
+    "isManga": false,
+    "itemType": 2,
+    "isFullData": false,
+    "appMinVerReq": "0.5.0",
+    "additionalParams": "",
+    "sourceCodeLanguage": 1,
+    "notes": "Extensión para NovelasLigeras.net con soporte para pestañas y capítulos organizados"
+  }
+]
